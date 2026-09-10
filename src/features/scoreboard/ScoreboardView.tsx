@@ -51,8 +51,8 @@ export function ScoreboardView() {
   if (!round.bracket && !round.isFinal) {
     try {
       luckyNames = roomBasedComputeAdvancement(state, roundIndex).luckyNames ?? [];
-    } catch {
-      luckyNames = [];
+    } catch (error) {
+      console.error(`Lucky-loser computation failed for round ${round.roundNum}`, error);
     }
   }
   const phase = round.isFinal

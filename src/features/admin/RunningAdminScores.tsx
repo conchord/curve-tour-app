@@ -120,8 +120,8 @@ export function RoomScores({ state, room }: { state: TournamentState; room: numb
   if (!round.bracket) {
     try {
       luckyNames = roomBasedComputeAdvancement(state, roundIndex).luckyNames ?? [];
-    } catch {
-      luckyNames = [];
+    } catch (error) {
+      console.error(`Lucky-loser computation failed for round ${round.roundNum}, room ${room}`, error);
     }
   }
   const ties = getAllTies(state, roundIndex);

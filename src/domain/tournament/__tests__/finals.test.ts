@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { computeGrandFinalRaceState, finalsProgressState, progressGrandFinalRace } from './finals';
-import { createDefaultTournamentState } from './state-defaults';
+import { computeGrandFinalRaceState, finalsProgressState, progressGrandFinalRace } from '../finals';
+import { createDefaultTournamentState } from '../state-defaults';
 import { buildRound } from './test-fixtures';
 
 function grandFinalState(numGames: number, finalScores: Record<string, number>, target = { wb: 2, lb: 3 }) {

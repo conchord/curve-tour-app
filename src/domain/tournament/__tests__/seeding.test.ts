@@ -5,10 +5,10 @@ import {
   selectPoolingBye,
   snakeSeed,
   swissFoldPair,
-} from './seeding';
-import { createDefaultTournamentState } from './state-defaults';
+} from '../seeding';
+import { createDefaultTournamentState } from '../state-defaults';
 import { buildRound, sequenceRandom } from './test-fixtures';
-import type { RoundAssignment, TournamentGroup } from './types';
+import type { RoundAssignment, TournamentGroup } from '../types';
 
 describe('snakeSeed', () => {
   it('fills rooms in order without bouncing when candidates fit exactly one pass', () => {

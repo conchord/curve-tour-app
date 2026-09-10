@@ -6,8 +6,8 @@ import {
   qualificationTablePoolingPhase,
   seedFromGroupStageRound,
   swissPoolingPhase,
-} from './pooling';
-import type { RoomSize } from './types';
+} from '../pooling';
+import type { RoomSize } from '../types';
 
 const FFA_ROOM_SIZE: RoomSize = { min: 6, max: 8, ideal: 8 };
 

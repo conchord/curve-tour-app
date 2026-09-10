@@ -8,8 +8,8 @@ import {
   invalidateStaleTieResolutions,
   isTieResolved,
   roomBasedComputeAdvancement,
-} from './advancement';
-import { createDefaultTournamentState } from './state-defaults';
+} from '../advancement';
+import { createDefaultTournamentState } from '../state-defaults';
 import { buildRound } from './test-fixtures';
 
 describe('detectTieBreaks', () => {

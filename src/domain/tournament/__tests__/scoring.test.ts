@@ -8,8 +8,8 @@ import {
   orderRoomByScore,
   scoreKeysForPosition,
   tieResolutionList,
-} from './scoring';
-import { createDefaultTournamentState } from './state-defaults';
+} from '../scoring';
+import { createDefaultTournamentState } from '../state-defaults';
 import { buildRound } from './test-fixtures';
 
 describe('getDefenderIndex', () => {

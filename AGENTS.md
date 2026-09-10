@@ -20,7 +20,7 @@ Repository-specific agent skills are stored under `.agents/skills/`.
 
 ## Testing
 
-We do not use automated testing in this codebase, with one exception: the pure-function tournament domain layer under `src/domain/tournament/` has Vitest unit tests (`pnpm test`), co-located as `*.test.ts` next to the file they cover. Coverage there is partial, not exhaustive — see `HANDOFF.md`'s "Immediate next priorities" for what's covered and what's still open. Everything else in the app (React components, hooks, wiring, server functions) still has none.
+We do not use automated testing in this codebase, with one exception: the pure-function tournament domain layer under `src/domain/tournament/` has Vitest unit tests (`pnpm test`), grouped in `src/domain/tournament/__tests__/` as one `*.test.ts` per source file it covers, plus a shared `test-fixtures.ts` helper. Coverage there is partial, not exhaustive — see `HANDOFF.md`'s "Immediate next priorities" for what's covered and what's still open. Everything else in the app (React components, hooks, wiring, server functions) still has none.
 
 ## Validating changes
 

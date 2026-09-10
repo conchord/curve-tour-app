@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { advanceTournamentRound } from './transitions';
-import { raceDoubleEliminationBracketPhase } from './double-elimination';
-import { createDefaultTournamentState } from './state-defaults';
+import { advanceTournamentRound } from '../transitions';
+import { raceDoubleEliminationBracketPhase } from '../double-elimination';
+import { createDefaultTournamentState } from '../state-defaults';
 import { buildRound } from './test-fixtures';
 
 describe('advanceTournamentRound — noop/blocked guards', () => {

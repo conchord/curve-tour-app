@@ -1,5 +1,5 @@
-import type { IdSource, RandomSource } from './runtime';
-import type { RoundAssignment, TournamentRound } from './types';
+import type { IdSource, RandomSource } from '../runtime';
+import type { RoundAssignment, TournamentRound } from '../types';
 
 /** Deterministic RandomSource yielding a fixed sequence, cycling if exhausted. */
 export function sequenceRandom(values: number[]): RandomSource {

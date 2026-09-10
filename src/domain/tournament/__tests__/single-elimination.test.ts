@@ -4,8 +4,8 @@ import {
   computeEliminationRoundCount,
   singleEliminationBracketPhase,
   type SingleEliminationConfig,
-} from './single-elimination';
-import type { RoomSize } from './types';
+} from '../single-elimination';
+import type { RoomSize } from '../types';
 
 const FFA_ROOM_SIZE: RoomSize = { min: 6, max: 8, ideal: 8 };
 const HEAD_TO_HEAD_ROOM_SIZE: RoomSize = { min: 2, max: 2, ideal: 2 };

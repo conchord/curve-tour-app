@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { generateTournament } from './generation';
-import { getMinimumBracketUnits } from './schedule-generation';
-import { createDefaultSetup, createDefaultTournamentState } from './state-defaults';
-import { createTournamentRuntime } from './runtime';
+import { generateTournament } from '../generation';
+import { getMinimumBracketUnits } from '../schedule-generation';
+import { createDefaultSetup, createDefaultTournamentState } from '../state-defaults';
+import { createTournamentRuntime } from '../runtime';
 import { fixedIdSource, sequenceRandom } from './test-fixtures';
 
 function names(count: number): string[] {

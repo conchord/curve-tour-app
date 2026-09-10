@@ -5,8 +5,8 @@ import {
   sharedFinalDoubleEliminationBracketPhase,
   type RaceDoubleEliminationConfig,
   type SharedFinalDoubleEliminationConfig,
-} from './double-elimination';
-import type { RoomSize } from './types';
+} from '../double-elimination';
+import type { RoomSize } from '../types';
 
 const HEAD_TO_HEAD_ROOM_SIZE: RoomSize = { min: 2, max: 2, ideal: 2 };
 const FFA_ROOM_SIZE: RoomSize = { min: 6, max: 8, ideal: 8 };

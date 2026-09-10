@@ -1,0 +1,60 @@
+import type { PersistedSetup, TournamentState } from './types';
+
+export function createDefaultTournamentState(overrides: Partial<TournamentState> = {}): TournamentState {
+  return {
+    title: '',
+    players: [],
+    reserves: [],
+    reserveIndividuals: [],
+    confirmedCount: null,
+    tournamentId: null,
+    rounds: [],
+    curRound: 0,
+    scores: {},
+    finalScores: {},
+    assignments: [],
+    luckyLosers: [],
+    byes: [],
+    poolingByeCounts: {},
+    pendingBracketSeeds: {},
+    qualTable: [],
+    groups: [],
+    groupStandings: {},
+    tieResolutions: {},
+    defenderChanges: {},
+    reserveOpen: true,
+    started: false,
+    needsSave: false,
+    autoSaved: false,
+    cfg: {},
+    scheduleLogic: 'single-elimination',
+    gameFormat: 'ffa-individual',
+    gamemodeConfig: {},
+    ...overrides,
+  };
+}
+
+export function createDefaultSetup(overrides: Partial<PersistedSetup> = {}): PersistedSetup {
+  return {
+    scheduleLogic: 'single-elimination',
+    gameFormat: 'ffa-individual',
+    scoring: 'fairpoints',
+    poolingPhase: 'none',
+    qualAdv: '24',
+    groupSize: '4',
+    roundRobinMode: 'single',
+    qualifiersPerGroup: '2',
+    finalsGames: '3',
+    semisGames: '1',
+    grandFinalWbTarget: '2',
+    grandFinalLbTarget: '3',
+    semisOverride: '',
+    finalOverride: '',
+    oddCountStrategy: '',
+    teamScoringRule: '',
+    roster: '',
+    reserves: '',
+    reserveIndividuals: '',
+    ...overrides,
+  };
+}

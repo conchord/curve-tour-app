@@ -5,5 +5,21 @@ HANDOFF_LOG.md
 Past files/
 Sheets tournaments/
 
+# JavaScript build and test output
+node_modules/
+.pnpm-store/
+.output/
+.nitro/
+.tanstack/
+coverage/
+playwright-report/
+test-results/
+test-results-app/
+
+# Local environment files
+.env
+.env.local
+migration-input/
+
 # Local Claude Code tool-permission config (machine-specific)
 .claude/settings.local.json

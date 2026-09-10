@@ -1,0 +1,79 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-background: var(--app-background);
+  --color-background-alt: var(--app-background-alt);
+  --color-surface: var(--app-surface);
+  --color-surface-low: var(--app-surface-low);
+  --color-surface-hover: var(--app-surface-hover);
+  --color-primary: var(--app-primary);
+  --color-primary-hover: var(--app-primary-hover);
+  --color-foreground: var(--app-foreground);
+  --color-muted: var(--app-muted);
+  --color-danger: var(--app-danger);
+  --color-success: var(--app-success);
+  --color-warning: var(--app-warning);
+  --color-accent: var(--app-accent);
+  --color-on-primary: var(--app-on-primary);
+  --color-primary-soft: var(--app-primary-soft);
+  --color-danger-soft: var(--app-danger-soft);
+  --color-success-soft: var(--app-success-soft);
+  --color-warning-soft: var(--app-warning-soft);
+  --color-accent-soft: var(--app-accent-soft);
+}
+
+@layer base {
+  :root {
+    color-scheme: dark;
+    --app-background: #0d0f14;
+    --app-background-alt: #111620;
+    --app-surface: #161b24;
+    --app-surface-low: #1e2535;
+    --app-surface-hover: #2b3548;
+    --app-primary: #00e5ff;
+    --app-primary-hover: #4deeff;
+    --app-foreground: #e8edf5;
+    --app-muted: #8090ad;
+    --app-danger: #ff4d6a;
+    --app-success: #00e096;
+    --app-warning: #ffb830;
+    --app-accent: #b57bff;
+    --app-on-primary: #0d0f14;
+    --app-primary-soft: rgb(0 229 255 / 9%);
+    --app-danger-soft: rgb(255 77 106 / 9%);
+    --app-success-soft: rgb(0 224 150 / 7%);
+    --app-warning-soft: rgb(255 184 48 / 9%);
+    --app-accent-soft: rgb(181 123 255 / 7%);
+    --shadow-card: rgb(0 0 0 / 28%);
+    --shadow-floating: rgb(0 0 0 / 66%);
+  }
+
+  html,
+  body {
+    min-width: 320px;
+    min-height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: linear-gradient(180deg, var(--app-background), var(--app-background-alt) 58%, var(--app-background));
+    color: var(--app-foreground);
+    font-family: "Inter", "Aptos", "Segoe UI", sans-serif;
+    font-size: 0.875rem;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  button,
+  input,
+  textarea,
+  select {
+    font: inherit;
+  }
+
+  ::selection {
+    background: rgb(0 229 255 / 24%);
+    color: var(--app-foreground);
+  }
+}

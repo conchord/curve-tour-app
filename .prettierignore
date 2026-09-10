@@ -1,0 +1,9 @@
+.output
+.tanstack
+build
+coverage
+dist
+legacy
+node_modules
+src/routeTree.gen.ts
+**/*.min.js

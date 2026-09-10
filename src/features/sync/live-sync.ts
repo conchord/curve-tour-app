@@ -96,6 +96,7 @@ export class SyncCoordinator {
   private dirtyFinalScores = new Set<string>();
   private timer: ReturnType<typeof setTimeout> | null = null;
   private unsubscribe: (() => void) | null = null;
+  private pushInFlight = false;
 
   constructor(initial: TournamentState, options: SyncCoordinatorOptions) {
     this.current = initial;
@@ -152,6 +153,13 @@ export class SyncCoordinator {
   private async push(): Promise<void> {
     this.timer = null;
     if (this.mode === 'viewer' || !this.transport || !this.tournamentId) return;
+    if (this.pushInFlight) {
+      // A previous push (e.g. a slow or hung write) is still settling — coalesce
+      // instead of firing another concurrent request on top of it, so a stalled
+      // sync backend can never accumulate an unbounded backlog of open writes.
+      this.schedulePush();
+      return;
+    }
     const stateAtPush = JSON.parse(JSON.stringify(this.current)) as TournamentState;
     const pushedScores = Object.fromEntries(
       [...this.dirtyScores].map((key) => [key, stateAtPush.scores[key]]),
@@ -160,6 +168,7 @@ export class SyncCoordinator {
       [...this.dirtyFinalScores].map((key) => [key, stateAtPush.finalScores[key]]),
     );
     const payload = marshalNullsForFirebase(stateAtPush);
+    this.pushInFlight = true;
     try {
       await this.transport.write(this.tournamentId, payload);
       for (const [key, value] of Object.entries(pushedScores))
@@ -169,6 +178,8 @@ export class SyncCoordinator {
       this.onStatus({ kind: 'active' });
     } catch (error) {
       this.onStatus({ kind: 'error', message: error instanceof Error ? error.message : String(error) });
+    } finally {
+      this.pushInFlight = false;
     }
   }
 

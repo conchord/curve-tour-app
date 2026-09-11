@@ -6,7 +6,7 @@ import {
 import { progressGrandFinalRace } from './finals';
 import { getGameFormat } from './formats';
 import { validateRoomCap } from './room-distribution';
-import { rosterKeys } from './roster';
+import { isDisplayNameTaken, rosterKeys } from './roster';
 import { buildTournamentProgression, type TournamentProgressionInput } from './schedule-generation';
 import { scoreKeysForPosition, tieResolutionList } from './scoring';
 import type { MaterializedGamemodeConfig, TournamentRoster, TournamentState, TournamentTeam } from './types';
@@ -134,7 +134,7 @@ function rebuildFutureRounds(state: TournamentState): TournamentState | null {
 
 export type ReserveAddResult =
   | { status: 'added'; state: TournamentState }
-  | { status: 'blocked'; reason: 'closed' | 'group-stage' | 'strict-room' | 'room-cap' }
+  | { status: 'blocked'; reason: 'closed' | 'group-stage' | 'strict-room' | 'room-cap' | 'duplicate-name' }
   | { status: 'confirm-over-cap'; room: number; count: number };
 
 export function addReserveUnit(
@@ -201,7 +201,7 @@ export function addWalkUpIndividual(
     return { status: 'blocked', reason: 'room-cap' };
   }
   if ((state.players as string[]).includes(trimmed) || (state.reserves as string[]).includes(trimmed)) {
-    return { status: 'blocked', reason: 'room-cap' };
+    return { status: 'blocked', reason: 'duplicate-name' };
   }
   return addReserveUnit({ ...state, reserves: [...(state.reserves as string[]), trimmed] }, trimmed, options);
 }
@@ -364,6 +364,9 @@ export function swapTeam(
   if (!teamSize || (state.players as TournamentTeam[]).some((team) => team.teamId === replacement.teamId)) {
     return state;
   }
+  // The outgoing team (oldTeamId) is excluded -- it's being removed by this
+  // same swap, so a replacement sharing its exact name is not a collision.
+  if (isDisplayNameTaken(state, replacement.teamName, oldTeamId)) return state;
   const replaced = replaceAssignedUnit(state, oldTeamId, replacement.teamId, teamSize);
   if (!replaced) return state;
 
@@ -424,6 +427,44 @@ export function setTeamDefender(state: TournamentState, teamId: string, memberId
     ...state,
     defenderChanges: { ...state.defenderChanges, [teamId]: changes },
   });
+}
+
+/**
+ * Clears just the registered roster (players/reserves/individual reserves)
+ * plus anything derived from it that would otherwise go stale -- the
+ * generated schedule preview, if "Generate Schedule" was already clicked
+ * pre-start. Deliberately preserves title/gameFormat/scheduleLogic/cfg (the
+ * Setup configuration itself) -- the complement of resetTournamentState()
+ * below, which preserves the roster but clears live progress.
+ */
+export function resetRoster(state: TournamentState): TournamentState {
+  return {
+    ...state,
+    players: [],
+    reserves: [],
+    reserveIndividuals: [],
+    confirmedCount: null,
+    rounds: [],
+    groups: [],
+    groupStandings: {},
+    qualTable: [],
+    gamemodeConfig: {},
+    scores: {},
+    finalScores: {},
+    assignments: [],
+    luckyLosers: [],
+    byes: [],
+    poolingByeCounts: {},
+    pendingBracketSeeds: {},
+    tieResolutions: {},
+    defenderChanges: {},
+    curRound: 0,
+    reserveOpen: true,
+    started: false,
+    needsSave: false,
+    autoSaved: false,
+    tournamentId: null,
+  };
 }
 
 export function resetTournamentState(state: TournamentState): TournamentState {

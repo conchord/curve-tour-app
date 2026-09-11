@@ -6,7 +6,13 @@ import {
   getGameFormat,
 } from '../../domain/tournament/formats';
 import { generateTournament } from '../../domain/tournament/generation';
-import { parseIndividualLines, parseMemberLine, parseTeamLines } from '../../domain/tournament/roster';
+import { resetRoster } from '../../domain/tournament/mutations';
+import {
+  findDuplicateDisplayNames,
+  parseIndividualLines,
+  parseMemberLine,
+  parseTeamLines,
+} from '../../domain/tournament/roster';
 import type { PersistedSetup } from '../../domain/tournament/types';
 import { useTournamentApp } from '../tournament/TournamentProvider';
 import {
@@ -126,6 +132,13 @@ export function SetupView() {
         window.alert(message);
         return;
       }
+      const duplicateTeams = findDuplicateDisplayNames([...players, ...reserves]);
+      if (duplicateTeams.length) {
+        window.alert(
+          `These team name(s) are used more than once across the roster and reserves — every team needs a unique name:\n\n${duplicateTeams.join('\n')}`,
+        );
+        return;
+      }
       const reserveIndividuals = parseIndividualLines(setup.reserveIndividuals).map(parseMemberLine);
       updateState({
         ...state,
@@ -140,6 +153,13 @@ export function SetupView() {
     } else {
       const players = parseIndividualLines(setup.roster.trim());
       const reserves = parseIndividualLines(setup.reserves.trim());
+      const duplicates = findDuplicateDisplayNames([...players, ...reserves]);
+      if (duplicates.length) {
+        window.alert(
+          `These name(s) are used more than once across the roster and reserves — every player needs a unique name:\n\n${duplicates.join('\n')}`,
+        );
+        return;
+      }
       updateState({
         ...state,
         players,
@@ -446,6 +466,19 @@ export function SetupView() {
           ) : null}
           <ButtonRow>
             <Button onClick={loadRoster}>Load roster & reserves</Button>
+            <Button
+              disabled={!state.players.length && !state.reserves.length}
+              onClick={() => {
+                if (
+                  window.confirm(
+                    'Clear the registered roster? This removes all players/teams and reserves, and any generated schedule preview. Tournament settings (format, schedule logic, etc.) are kept.',
+                  )
+                )
+                  updateState(resetRoster(state));
+              }}
+            >
+              ↺ Clear roster
+            </Button>
             <span className='self-center text-xs text-muted'>{status}</span>
           </ButtonRow>
         </Panel>

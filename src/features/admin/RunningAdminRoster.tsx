@@ -13,7 +13,7 @@ import {
   updateTeam,
   type ReserveAddResult,
 } from '../../domain/tournament/mutations';
-import { parseTeamLines } from '../../domain/tournament/roster';
+import { isDisplayNameTaken, parseTeamLines } from '../../domain/tournament/roster';
 import { getDefenderIndex } from '../../domain/tournament/scoring';
 import type { TournamentState, TournamentTeam } from '../../domain/tournament/types';
 import { TournamentUnit } from '../../components/tournament/TournamentUnit';
@@ -40,6 +40,7 @@ function handleReserveResult(
     'strict-room':
       "Can't add this reserve — the selected strict odd-count strategy requires every room to remain even.",
     'room-cap': "Can't add this reserve — it would push a future round over the game's hard room cap.",
+    'duplicate-name': 'A player with that name is already registered — pick a different name.',
   };
   window.alert(messages[result.reason]);
 }
@@ -159,7 +160,12 @@ export function ManageRoster({ state }: { state: TournamentState }) {
                   title='Rename'
                   onClick={() => {
                     const value = window.prompt(`Rename "${name}" to:`, name);
-                    if (value !== null) app.updateState((current) => renameIndividual(current, name, value));
+                    if (value === null || !value.trim() || value.trim() === name) return;
+                    if (isDisplayNameTaken(state, value, name)) {
+                      window.alert(`"${value.trim()}" is already registered — pick a different name.`);
+                      return;
+                    }
+                    app.updateState((current) => renameIndividual(current, name, value));
                   }}
                 >
                   ✎
@@ -169,7 +175,17 @@ export function ManageRoster({ state }: { state: TournamentState }) {
                   title='Swap'
                   onClick={() => {
                     const value = window.prompt(`Swap out "${name}". Enter the replacement's name:`);
-                    if (value !== null) app.updateState((current) => swapIndividual(current, name, value));
+                    if (value === null) return;
+                    // Only the active roster is a real conflict here -- a
+                    // name matching an existing reserve is legitimately
+                    // consumed by swapIndividual() (it promotes that
+                    // reserve), matching the "+" reserve-add button's own
+                    // effect, so that case is not blocked.
+                    if ((state.players as string[]).includes(value.trim())) {
+                      window.alert(`"${value.trim()}" is already registered — pick a different name.`);
+                      return;
+                    }
+                    app.updateState((current) => swapIndividual(current, name, value));
                   }}
                 >
                   ⇄
@@ -213,13 +229,19 @@ export function ManageRoster({ state }: { state: TournamentState }) {
                       title='Rename team'
                       onClick={() => {
                         const value = window.prompt(`Rename team "${team.teamName}" to:`, team.teamName);
-                        if (value?.trim())
-                          app.updateState((current) =>
-                            updateTeam(current, team.teamId, (entry) => ({
-                              ...entry,
-                              teamName: value.trim(),
-                            })),
+                        if (!value?.trim()) return;
+                        if (isDisplayNameTaken(state, value, team.teamId)) {
+                          window.alert(
+                            `A team called "${value.trim()}" is already registered — pick a different name.`,
                           );
+                          return;
+                        }
+                        app.updateState((current) =>
+                          updateTeam(current, team.teamId, (entry) => ({
+                            ...entry,
+                            teamName: value.trim(),
+                          })),
+                        );
                       }}
                     >
                       ✎
@@ -268,13 +290,12 @@ export function ManageRoster({ state }: { state: TournamentState }) {
                             return;
                           }
                         }
-                        if (
-                          teams.some((entry) => entry.teamName === replacement?.teamName) &&
-                          !window.confirm(
-                            `A team called "${replacement.teamName}" is already competing. Add it anyway?`,
-                          )
-                        )
+                        if (isDisplayNameTaken(state, replacement.teamName, team.teamId)) {
+                          window.alert(
+                            `A team called "${replacement.teamName}" is already registered — pick a different name.`,
+                          );
                           return;
+                        }
                         app.updateState((current) => swapTeam(current, team.teamId, replacement));
                       }}
                     >

@@ -14,6 +14,43 @@ export function rosterKeys(players: TournamentRoster): string[] {
   return players.map(rosterKey);
 }
 
+/**
+ * True if `name` (trimmed) already matches an existing player/team display
+ * name in `state.players` or `state.reserves` -- excluding the unit
+ * identified by `excludeKey` (its own current key), so renaming/swapping a
+ * unit using its own current name/id isn't flagged as colliding with itself.
+ */
+export function isDisplayNameTaken(
+  state: Pick<TournamentState, 'players' | 'reserves'>,
+  name: string,
+  excludeKey?: string,
+): boolean {
+  const trimmed = name.trim();
+  if (!trimmed) return false;
+  const entries: Array<string | TournamentTeam> = [...state.players, ...state.reserves];
+  return entries.some((entry) => {
+    if (rosterKey(entry) === excludeKey) return false;
+    const display = isTournamentTeam(entry) ? entry.teamName : entry;
+    return display === trimmed;
+  });
+}
+
+/**
+ * Names that appear more than once across `entries` (players/reserves
+ * combined) -- for validating a freshly-parsed roster/reserves list before
+ * it's ever written to state.
+ */
+export function findDuplicateDisplayNames(entries: TournamentRoster): string[] {
+  const seen = new Set<string>();
+  const duplicates = new Set<string>();
+  for (const entry of entries) {
+    const display = (isTournamentTeam(entry) ? entry.teamName : entry).trim();
+    if (seen.has(display)) duplicates.add(display);
+    seen.add(display);
+  }
+  return [...duplicates];
+}
+
 export function buildTeamMap(
   state: Pick<TournamentState, 'players' | 'reserves'>,
 ): Record<string, TournamentTeam> {

@@ -17,7 +17,8 @@ import type { RoundAssignment, TournamentRound, TournamentState } from './types'
 
 const PENDING_TIES_MESSAGE = 'Resolve all tie-breaks before advancing.';
 
-type RoundAdvanceBlockReason = 'pending-ties' | 'malformed-final' | 'invalid-room-split';
+type RoundAdvanceBlockReason =
+  'pending-ties' | 'malformed-final' | 'invalid-room-split' | 'missing-room-size';
 
 type RoundAdvanceNoopReason = 'last-round' | 'grand-final';
 
@@ -135,6 +136,9 @@ function invalidRoomSplitMessage(actual: number, ideal: number): string {
   return `Can't advance — ${actual} units would be heading into the next round, which can't form a clean room split (needs a multiple of ${ideal}). This usually means a team was removed mid-tournament; check Manage Teams before advancing.`;
 }
 
+const MISSING_ROOM_SIZE_MESSAGE =
+  "Can't advance — this tournament's gamemode configuration is missing a room size. This should never happen for a tournament generated through Setup; it may indicate corrupted or manually-edited state.";
+
 function advanceDoubleElimination(
   input: TournamentState,
   roundIndex: number,
@@ -145,7 +149,12 @@ function advanceDoubleElimination(
   }
   const roomSize = input.gamemodeConfig.roomSize;
   if (!roomSize) {
-    throw new Error('A generated double-elimination tournament requires roomSize.');
+    return {
+      status: 'blocked',
+      reason: 'missing-room-size',
+      message: MISSING_ROOM_SIZE_MESSAGE,
+      state: input,
+    };
   }
   const state = cloneForTransition(input);
   const result = doubleEliminationComputeAdvancement(state, roundIndex);
@@ -280,7 +289,12 @@ export function advanceTournamentRound(input: TournamentState): RoundAdvanceResu
   } else if (nextRound.isSwiss) {
     const roomSize = state.gamemodeConfig.roomSize;
     if (!roomSize) {
-      throw new Error('A generated Swiss tournament requires roomSize.');
+      return {
+        status: 'blocked',
+        reason: 'missing-room-size',
+        message: MISSING_ROOM_SIZE_MESSAGE,
+        state,
+      };
     }
     const paired = swissFoldPair({
       activeNames: advancing.map((entry) => entry.name),
@@ -294,7 +308,12 @@ export function advanceTournamentRound(input: TournamentState): RoundAdvanceResu
   } else {
     const roomSize = state.gamemodeConfig.roomSize;
     if (!roomSize) {
-      throw new Error('A generated tournament requires roomSize.');
+      return {
+        status: 'blocked',
+        reason: 'missing-room-size',
+        message: MISSING_ROOM_SIZE_MESSAGE,
+        state,
+      };
     }
     const newByes: SeedCandidate[] = [];
     if (state.gamemodeConfig.oddCountStrategy === 'bye') {

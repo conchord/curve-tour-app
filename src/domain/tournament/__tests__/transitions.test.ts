@@ -4,6 +4,53 @@ import { raceDoubleEliminationBracketPhase } from '../double-elimination';
 import { createDefaultTournamentState } from '../state-defaults';
 import { buildRound } from './test-fixtures';
 
+describe('advanceTournamentRound — missing roomSize backstop', () => {
+  it('returns blocked/"missing-room-size" (not a throw) for a bracket round with no gamemodeConfig.roomSize', () => {
+    const state = createDefaultTournamentState({
+      rounds: [
+        buildRound({ roundNum: 1, bracket: 'winners', rooms: [2], players: 2, advPerRoom: 1 }),
+        buildRound({ roundNum: 2, rooms: [2], players: 2 }),
+      ],
+      assignments: [[{ name: 'P1', room: 1, isLucky: false }]],
+      gamemodeConfig: {},
+      curRound: 0,
+    });
+    const result = advanceTournamentRound(state);
+    expect(result.status).toBe('blocked');
+    expect(result.status === 'blocked' && result.reason).toBe('missing-room-size');
+  });
+
+  it('returns blocked/"missing-room-size" (not a throw) when advancing into a Swiss round with no gamemodeConfig.roomSize', () => {
+    const state = createDefaultTournamentState({
+      rounds: [
+        buildRound({ roundNum: 1, isNoElim: true, rooms: [2], players: 2, advTotal: 2 }),
+        buildRound({ roundNum: 2, isSwiss: true, rooms: [2], players: 2 }),
+      ],
+      assignments: [[{ name: 'P1', room: 1, isLucky: false }]],
+      gamemodeConfig: {},
+      curRound: 0,
+    });
+    const result = advanceTournamentRound(state);
+    expect(result.status).toBe('blocked');
+    expect(result.status === 'blocked' && result.reason).toBe('missing-room-size');
+  });
+
+  it('returns blocked/"missing-room-size" (not a throw) for an ordinary round with no gamemodeConfig.roomSize', () => {
+    const state = createDefaultTournamentState({
+      rounds: [
+        buildRound({ roundNum: 1, isNoElim: true, rooms: [2], players: 2, advTotal: 2 }),
+        buildRound({ roundNum: 2, rooms: [2], players: 2 }),
+      ],
+      assignments: [[{ name: 'P1', room: 1, isLucky: false }]],
+      gamemodeConfig: {},
+      curRound: 0,
+    });
+    const result = advanceTournamentRound(state);
+    expect(result.status).toBe('blocked');
+    expect(result.status === 'blocked' && result.reason).toBe('missing-room-size');
+  });
+});
+
 describe('advanceTournamentRound — noop/blocked guards', () => {
   it('returns noop/"last-round" when there is no next round', () => {
     const state = createDefaultTournamentState({

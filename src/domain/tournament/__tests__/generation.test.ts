@@ -68,6 +68,276 @@ describe('generateTournament -- validation failures', () => {
   });
 });
 
+describe('generateTournament -- Group Stage format gating', () => {
+  it.each([
+    ['ffa-individual', 20, 'FFA — Individual'],
+    ['team-2v2v2v2', 10, '2v2v2v2'],
+    ['team-3v3v3', 8, '3v3v3'],
+  ] as const)(
+    'refuses Group Stage for %s -- round-robin needs a head-to-head room shape',
+    (gameFormat, confirmedCount, label) => {
+      const state = createDefaultTournamentState({ confirmedCount });
+      const form = createDefaultSetup({ gameFormat, poolingPhase: 'group-stage' });
+      const result = generateTournament(state, form, createTournamentRuntime());
+      expect(result.status).toBe('invalid');
+      if (result.status === 'invalid') {
+        expect(result.message).toContain('Group Stage');
+        expect(result.message).toContain(label);
+      }
+    },
+  );
+
+  it('still generates Group Stage successfully for a head-to-head format (individual-1v1)', () => {
+    const state = createDefaultTournamentState({ confirmedCount: 12, players: names(12) });
+    const form = createDefaultSetup({ gameFormat: 'individual-1v1', poolingPhase: 'group-stage' });
+    const result = generateTournament(state, form, createTournamentRuntime({ ids: fixedIdSource() }));
+    expect(result.status).toBe('generated');
+    if (result.status !== 'generated') return;
+    expect(result.state.rounds[0].isGroupStage).toBe(true);
+    expect(result.state.groups.length).toBeGreaterThan(0);
+  });
+});
+
+describe('generateTournament -- Swiss format gating', () => {
+  it.each([
+    ['ffa-individual', 20, 'FFA — Individual'],
+    ['team-2v2v2v2', 10, '2v2v2v2'],
+    ['team-3v3v3', 8, '3v3v3'],
+  ] as const)(
+    'refuses Swiss for %s -- fold-pairing needs a head-to-head room shape',
+    (gameFormat, confirmedCount, label) => {
+      const state = createDefaultTournamentState({ confirmedCount });
+      const form = createDefaultSetup({ gameFormat, poolingPhase: 'swiss' });
+      const result = generateTournament(state, form, createTournamentRuntime());
+      expect(result.status).toBe('invalid');
+      if (result.status === 'invalid') {
+        expect(result.message).toContain('Swiss');
+        expect(result.message).toContain(label);
+      }
+    },
+  );
+
+  it('still generates Swiss successfully for a head-to-head format (individual-1v1)', () => {
+    const state = createDefaultTournamentState({ confirmedCount: 8, players: names(8) });
+    const form = createDefaultSetup({ gameFormat: 'individual-1v1', poolingPhase: 'swiss' });
+    const result = generateTournament(state, form, createTournamentRuntime({ ids: fixedIdSource() }));
+    expect(result.status).toBe('generated');
+    if (result.status !== 'generated') return;
+    expect(result.state.rounds[0].isSwiss).toBe(true);
+  });
+});
+
+describe('generateTournament -- double-elimination format/odd-count-strategy gating', () => {
+  it('refuses "double-elimination" for a non-head-to-head format', () => {
+    const state = createDefaultTournamentState({ confirmedCount: 20 });
+    const form = createDefaultSetup({ gameFormat: 'ffa-individual', scheduleLogic: 'double-elimination' });
+    const result = generateTournament(state, form, createTournamentRuntime());
+    expect(result.status).toBe('invalid');
+    if (result.status === 'invalid') {
+      expect(result.message).toContain('Double elimination');
+      expect(result.message).toContain('FFA — Individual');
+    }
+  });
+
+  it('refuses "double-elimination" combined with the "flex" odd-count strategy -- the stale UI-desync scenario (odd-count-strategy changed after schedule logic was picked)', () => {
+    const state = createDefaultTournamentState({ confirmedCount: 16 });
+    const form = createDefaultSetup({
+      gameFormat: 'team-3v3',
+      scheduleLogic: 'double-elimination',
+      oddCountStrategy: 'flex',
+    });
+    const result = generateTournament(state, form, createTournamentRuntime());
+    expect(result.status).toBe('invalid');
+    if (result.status === 'invalid') {
+      expect(result.message).toContain('Double elimination');
+      expect(result.message).toContain('Flex');
+    }
+  });
+});
+
+describe('generateTournament -- double-elimination bracket-entry-count reachability', () => {
+  it('refuses Group Stage + Double Elimination when too few qualifiers would actually reach the bracket', () => {
+    // 6 players, groups of 3 (2 groups), 1 qualifier per group -> only 2
+    // units would enter the bracket phase, below double-elimination's own
+    // floor of 2 winners-bracket rounds (needs at least 3, floored to 4 by
+    // getMinimumBracketUnits's conservative flat minimum).
+    const state = createDefaultTournamentState({ confirmedCount: 6 });
+    const form = createDefaultSetup({
+      gameFormat: 'individual-1v1',
+      scheduleLogic: 'double-elimination',
+      poolingPhase: 'group-stage',
+      groupSize: '3',
+      qualifiersPerGroup: '1',
+    });
+    const result = generateTournament(state, form, createTournamentRuntime());
+    expect(result.status).toBe('invalid');
+    if (result.status === 'invalid') {
+      expect(result.message).toContain('double-elimination bracket');
+      expect(result.message).toContain('enter the bracket phase');
+    }
+  });
+
+  it('refuses a Final size override for double-elimination-shared-final that needs more WB qualifiers than would actually enter the bracket', () => {
+    const state = createDefaultTournamentState({ confirmedCount: 16 });
+    const form = createDefaultSetup({
+      gameFormat: 'ffa-individual',
+      scheduleLogic: 'double-elimination-shared-final',
+      poolingPhase: 'none',
+      finalOverride: '30',
+    });
+    const result = generateTournament(state, form, createTournamentRuntime());
+    expect(result.status).toBe('invalid');
+    if (result.status === 'invalid') {
+      expect(result.message).toContain('Final size override');
+      expect(result.message).toContain('winners-bracket qualifiers');
+    }
+  });
+});
+
+describe('generateTournament -- double-elimination-shared-final + Group Stage / Swiss (empirical smoke check)', () => {
+  // Both combinations are only UI-reachable for a head-to-head format via
+  // the 'flex' odd-count strategy (team-3v3 is the only format supporting
+  // it) -- flex keeps raceCompatible false (so shared-final, not the race
+  // variant, is offered) while leaving Group Stage/Swiss still available
+  // (both only require idealRoomSize===2, unaffected by flex). Verified
+  // structurally plausible during the audit but never executed -- these
+  // anchors convert "looks fine on paper" into "confirmed by running it."
+  it('generates successfully: team-3v3, Group Stage + double-elimination-shared-final', () => {
+    const state = createDefaultTournamentState({ confirmedCount: 12, players: names(12) });
+    const form = {
+      ...createDefaultSetup({
+        gameFormat: 'team-3v3',
+        scheduleLogic: 'double-elimination-shared-final',
+        poolingPhase: 'group-stage',
+        oddCountStrategy: 'flex',
+        finalOverride: '3',
+      }),
+      lbQualifiers: '2',
+    };
+    const result = generateTournament(state, form, createTournamentRuntime({ ids: fixedIdSource() }));
+    expect(result.status).toBe('generated');
+    if (result.status !== 'generated') return;
+    expect(result.state.rounds[0].isGroupStage).toBe(true);
+    expect(result.state.rounds.some((r) => r.bracket === 'winners')).toBe(true);
+    expect(result.state.rounds.some((r) => r.bracket === 'losers')).toBe(true);
+    expect(result.state.rounds[result.state.rounds.length - 1]).toMatchObject({ isFinal: true, rooms: [3] });
+  });
+
+  it('generates successfully: team-3v3, Swiss + double-elimination-shared-final', () => {
+    const state = createDefaultTournamentState({ confirmedCount: 8, players: names(8) });
+    const form = {
+      ...createDefaultSetup({
+        gameFormat: 'team-3v3',
+        scheduleLogic: 'double-elimination-shared-final',
+        poolingPhase: 'swiss',
+        oddCountStrategy: 'flex',
+        finalOverride: '3',
+      }),
+      lbQualifiers: '2',
+    };
+    const result = generateTournament(state, form, createTournamentRuntime({ ids: fixedIdSource() }));
+    expect(result.status).toBe('generated');
+    if (result.status !== 'generated') return;
+    expect(result.state.rounds[0].isSwiss).toBe(true);
+    expect(result.state.rounds.some((r) => r.bracket === 'winners')).toBe(true);
+    expect(result.state.rounds.some((r) => r.bracket === 'losers')).toBe(true);
+    expect(result.state.rounds[result.state.rounds.length - 1]).toMatchObject({ isFinal: true, rooms: [3] });
+  });
+});
+
+describe('generateTournament -- Stage B numeric-input robustness', () => {
+  it('refuses a negative Semis size override', () => {
+    const state = createDefaultTournamentState({ confirmedCount: 20 });
+    const form = createDefaultSetup({
+      gameFormat: 'ffa-individual',
+      scheduleLogic: 'single-elimination',
+      semisOverride: '-5',
+    });
+    const result = generateTournament(state, form, createTournamentRuntime());
+    expect(result.status).toBe('invalid');
+    if (result.status === 'invalid') {
+      expect(result.message).toContain('Semis size override');
+      expect(result.message).toContain('positive');
+    }
+  });
+
+  it('refuses a negative Final size override', () => {
+    const state = createDefaultTournamentState({ confirmedCount: 20 });
+    const form = createDefaultSetup({
+      gameFormat: 'ffa-individual',
+      scheduleLogic: 'single-elimination',
+      finalOverride: '-3',
+    });
+    const result = generateTournament(state, form, createTournamentRuntime());
+    expect(result.status).toBe('invalid');
+    if (result.status === 'invalid') {
+      expect(result.message).toContain('Final size override');
+      expect(result.message).toContain('positive');
+    }
+  });
+
+  it('refuses a Final size override exceeding the derived default Semis size when no Semis override is set', () => {
+    // ffa-individual's default Semis size is 2 * roomSize.ideal = 16.
+    const state = createDefaultTournamentState({ confirmedCount: 20 });
+    const form = createDefaultSetup({
+      gameFormat: 'ffa-individual',
+      scheduleLogic: 'single-elimination',
+      finalOverride: '20',
+    });
+    const result = generateTournament(state, form, createTournamentRuntime());
+    expect(result.status).toBe('invalid');
+    if (result.status === 'invalid') {
+      expect(result.message).toContain('Final size override');
+      expect(result.message).toContain('default Semis size');
+    }
+  });
+
+  it('refuses a Group size exceeding the upper bound', () => {
+    const state = createDefaultTournamentState({ confirmedCount: 10 });
+    const form = createDefaultSetup({
+      gameFormat: 'individual-1v1',
+      poolingPhase: 'group-stage',
+      groupSize: '10',
+    });
+    const result = generateTournament(state, form, createTournamentRuntime());
+    expect(result.status).toBe('invalid');
+    if (result.status === 'invalid') {
+      expect(result.message).toContain('Group size');
+      expect(result.message).toContain("can't exceed");
+    }
+  });
+
+  it('refuses a negative Qualifiers per group', () => {
+    const state = createDefaultTournamentState({ confirmedCount: 10 });
+    const form = createDefaultSetup({
+      gameFormat: 'individual-1v1',
+      poolingPhase: 'group-stage',
+      qualifiersPerGroup: '-1',
+    });
+    const result = generateTournament(state, form, createTournamentRuntime());
+    expect(result.status).toBe('invalid');
+    if (result.status === 'invalid') {
+      expect(result.message).toContain('Qualifiers per group');
+      expect(result.message).toContain('positive');
+    }
+  });
+
+  it('refuses a negative Grand Final win target', () => {
+    const state = createDefaultTournamentState({ confirmedCount: 16 });
+    const form = createDefaultSetup({
+      gameFormat: 'individual-1v1',
+      scheduleLogic: 'double-elimination',
+      grandFinalWbTarget: '-2',
+    });
+    const result = generateTournament(state, form, createTournamentRuntime());
+    expect(result.status).toBe('invalid');
+    if (result.status === 'invalid') {
+      expect(result.message).toContain('Grand Final win targets');
+      expect(result.message).toContain('positive');
+    }
+  });
+});
+
 describe('generateTournament -- round-0 seeding', () => {
   it('seeds round 0 via randomSeed with the injected RandomSource, exact assignment', () => {
     const state = createDefaultTournamentState({ confirmedCount: 4, players: names(4) });

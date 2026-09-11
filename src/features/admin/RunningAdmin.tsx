@@ -211,7 +211,17 @@ export function RunningAdmin() {
             disabled={pendingTies}
             title={pendingTies ? 'Resolve tie-breaks first' : undefined}
             onClick={() => {
-              const result = advanceTournamentRound(state);
+              // Last-resort backstop: every known failure mode returns a
+              // 'blocked' result instead of throwing, but this guards
+              // against any future/unanticipated throw deep in the
+              // advancement logic crashing the whole Admin panel mid-tournament.
+              let result;
+              try {
+                result = advanceTournamentRound(state);
+              } catch (error) {
+                setMessage(error instanceof Error ? error.message : String(error));
+                return;
+              }
               if (result.status === 'advanced') {
                 setMessage('');
                 app.updateState(result.state);

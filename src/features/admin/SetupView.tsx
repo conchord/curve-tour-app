@@ -42,9 +42,44 @@ export function SetupView() {
         : [{ value: 'double-elimination-shared-final', label: 'Double elimination — FFA/Team' }],
     [raceCompatible],
   );
+  // Swiss fold-pairing and Group Stage round-robin scheduling both only make
+  // sense for a head-to-head (exactly 2 units per room) format — neither can
+  // represent a multi-way FFA/team room.
+  const headToHeadOnly = format?.idealRoomSize === 2;
+  const poolingPhaseOptions = useMemo(
+    () => [
+      { value: 'none', label: 'None — standard elimination from R1' },
+      { value: 'qual-table', label: 'Qualification Table — R1/R2/R3 feed cumulative table' },
+      ...(headToHeadOnly
+        ? [
+            { value: 'swiss', label: 'Swiss — fold-paired rounds feed cumulative standings' },
+            { value: 'group-stage', label: 'Group Stage — round-robin groups, top finishers advance' },
+          ]
+        : []),
+    ],
+    [headToHeadOnly],
+  );
 
   function change(key: SetupKey, value: string) {
     updateSetup((current) => ({ ...current, [key]: value }));
+  }
+
+  // Odd-count strategy alone can flip raceCompatible (e.g. picking 'flex')
+  // without the game format changing — reconcile scheduleLogic here too,
+  // the same way changeFormat() does, so a stale 'double-elimination'
+  // selection can never survive its own option disappearing from the list.
+  function changeOddCountStrategy(value: string) {
+    const compatible = format?.idealRoomSize === 2 && value !== 'flex';
+    updateSetup((current) => ({
+      ...current,
+      oddCountStrategy: value as PersistedSetup['oddCountStrategy'],
+      scheduleLogic:
+        current.scheduleLogic === 'double-elimination' && !compatible
+          ? 'single-elimination'
+          : current.scheduleLogic === 'double-elimination-shared-final' && compatible
+            ? 'single-elimination'
+            : current.scheduleLogic,
+    }));
   }
 
   function changeFormat(value: string) {
@@ -62,6 +97,11 @@ export function SetupView() {
           : current.scheduleLogic === 'double-elimination-shared-final' && compatible
             ? 'single-elimination'
             : current.scheduleLogic,
+      poolingPhase:
+        (current.poolingPhase === 'group-stage' || current.poolingPhase === 'swiss') &&
+        nextFormat?.idealRoomSize !== 2
+          ? 'none'
+          : current.poolingPhase,
     }));
   }
 
@@ -197,10 +237,11 @@ export function SetupView() {
               value={setup.poolingPhase}
               onChange={(e) => change('poolingPhase', e.target.value)}
             >
-              <option value='none'>None — standard elimination from R1</option>
-              <option value='qual-table'>Qualification Table — R1/R2/R3 feed cumulative table</option>
-              <option value='swiss'>Swiss — fold-paired rounds feed cumulative standings</option>
-              <option value='group-stage'>Group Stage — round-robin groups, top finishers advance</option>
+              {poolingPhaseOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
             </Select>
           </Field>
           {isGroup ? (
@@ -251,7 +292,7 @@ export function SetupView() {
               <Select
                 id='cfg-odd-count-strategy'
                 value={setup.oddCountStrategy || format.supportedOddCountStrategies[0]}
-                onChange={(e) => change('oddCountStrategy', e.target.value)}
+                onChange={(e) => changeOddCountStrategy(e.target.value)}
               >
                 {format.supportedOddCountStrategies.map((key) => (
                   <option key={key} value={key}>

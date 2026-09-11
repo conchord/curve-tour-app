@@ -1,6 +1,7 @@
 import {
   doubleEliminationComputeAdvancement,
   hasPendingTies,
+  kingsValleyComputeAdvancement,
   refreshRoundStandings,
   roomBasedComputeAdvancement,
 } from './advancement';
@@ -9,6 +10,7 @@ import { seedFromGroupStageRound } from './pooling';
 import {
   avoidSameGroupInFirstBracketRound,
   selectPoolingBye,
+  sequentialSeed,
   snakeSeed,
   swissFoldPair,
   type SeedCandidate,
@@ -236,6 +238,27 @@ function malformedOrdinaryFinalMessage(actual: number): string {
 }
 
 /**
+ * Kings Valley's advance step: merge each room's promote/stay/demote bands
+ * into one flat best-to-worst survivor order (kingsValleyComputeAdvancement),
+ * then slice that order into the next round's already-precomputed room
+ * sizes (sequentialSeed). Eliminated names need no bookkeeping of their own
+ * -- they're simply absent from the next round's assignments, which is
+ * already computeRankings()'s existing elimination signal for any round
+ * that doesn't set round.bracket.
+ */
+function advanceKingsValley(input: TournamentState, roundIndex: number): RoundAdvanceResult {
+  const state = cloneForTransition(input);
+  const { nextRoomOrder } = kingsValleyComputeAdvancement(state, roundIndex);
+  const nextIndex = roundIndex + 1;
+  const nextRound = state.rounds[nextIndex];
+  state.assignments[nextIndex] = sequentialSeed(nextRoomOrder, nextRound.rooms);
+  state.curRound = nextIndex;
+  state.reserveOpen = reserveWindowAtCurrentRound(state);
+  state.needsSave = true;
+  return { status: 'advanced', state };
+}
+
+/**
  * Pure counterpart of legacy advanceRound(). UI effects (alert, render,
  * persistence and sync) are represented by the returned result/state.
  */
@@ -258,6 +281,9 @@ export function advanceTournamentRound(input: TournamentState): RoundAdvanceResu
   }
   if (round.bracket) {
     return advanceDoubleElimination(prepared, roundIndex, round);
+  }
+  if (round.isKingsValley) {
+    return advanceKingsValley(prepared, roundIndex);
   }
 
   const state = cloneForTransition(prepared);

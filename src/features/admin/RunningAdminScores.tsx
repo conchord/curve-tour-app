@@ -103,6 +103,9 @@ export function RoomScores({ state, room }: { state: TournamentState; room: numb
   const games = (round.numGames ?? 1) > 1 ? (round.numGames ?? 1) : 1;
   const teamSize = format?.teamSize ?? 0;
   const direct = round.isNoElim ? assignments.length : (round.advPerRoom ?? 0);
+  const isBottomRoom = round.isKingsValley && room === round.rooms.length;
+  const promoteCount = round.kvPromoteCounts?.[room - 1] ?? 0;
+  const cutCount = isBottomRoom ? (round.kvEliminateCount ?? 0) : (round.kvDemoteCounts?.[room - 1] ?? 0);
   const ranked = orderRoomByScore(
     assignments
       .map((entry, position) => ({
@@ -117,7 +120,7 @@ export function RoomScores({ state, room }: { state: TournamentState; room: numb
   );
   const rankByName = new Map(ranked.map((entry, index) => [entry.name, index + 1]));
   let luckyNames: string[] = [];
-  if (!round.bracket) {
+  if (!round.bracket && !round.isKingsValley) {
     try {
       luckyNames = roomBasedComputeAdvancement(state, roundIndex).luckyNames ?? [];
     } catch (error) {
@@ -137,9 +140,9 @@ export function RoomScores({ state, room }: { state: TournamentState; room: numb
           {round.isGroupStage ? `Group ${round.roomGroups?.[room - 1]} · ` : ''}Room {room}
         </div>
         <div className='mt-1 text-xs text-muted'>
-          {assignments.length} {format?.unitLabelPlural.toLowerCase()} · top {round.isNoElim ? 'all' : direct}{' '}
-          advance directly
-          {round.luckyCount ? ' + lucky losers' : ''}
+          {round.isKingsValley
+            ? `${assignments.length} ${format?.unitLabelPlural.toLowerCase()} · top ${promoteCount} promote · bottom ${cutCount} ${isBottomRoom ? 'eliminated' : 'demote'}`
+            : `${assignments.length} ${format?.unitLabelPlural.toLowerCase()} · top ${round.isNoElim ? 'all' : direct} advance directly${round.luckyCount ? ' + lucky losers' : ''}`}
         </div>
       </div>
       <TableScroll>
@@ -159,11 +162,19 @@ export function RoomScores({ state, room }: { state: TournamentState; room: numb
                 ? '—'
                 : unresolvedNames.has(assignment.name)
                   ? '⚠ Tie'
-                  : round.isNoElim || rank <= direct
-                    ? 'Advances'
-                    : luckyNames.includes(assignment.name)
-                      ? '★ Lucky Loser'
-                      : 'Eliminated';
+                  : round.isKingsValley
+                    ? rank <= promoteCount
+                      ? '▲ Promotes'
+                      : rank > assignments.length - cutCount
+                        ? isBottomRoom
+                          ? '☠ Eliminated'
+                          : '▼ Demotes'
+                        : '— Stays'
+                    : round.isNoElim || rank <= direct
+                      ? 'Advances'
+                      : luckyNames.includes(assignment.name)
+                        ? '★ Lucky Loser'
+                        : 'Eliminated';
               const team = teamSize
                 ? (state.players as TournamentTeam[]).find((entry) => entry.teamId === assignment.name)
                 : null;
@@ -171,19 +182,27 @@ export function RoomScores({ state, room }: { state: TournamentState; room: numb
                 <TableRow
                   key={assignment.name}
                   tone={
-                    status === 'Advances'
+                    status === 'Advances' || status === '▲ Promotes'
                       ? 'advance'
                       : status.includes('Lucky')
                         ? 'lucky'
-                        : status === 'Eliminated'
+                        : status === 'Eliminated' || status === '☠ Eliminated'
                           ? 'eliminate'
                           : status.includes('Tie')
                             ? 'tie'
-                            : 'default'
+                            : status === '▼ Demotes'
+                              ? 'warning'
+                              : 'default'
                   }
                 >
                   <TableCell>
-                    <Position highlighted={Boolean(rank && rank <= direct)}>{rank ?? '—'}</Position>
+                    <Position
+                      highlighted={Boolean(
+                        rank && (round.isKingsValley ? rank <= promoteCount : rank <= direct),
+                      )}
+                    >
+                      {rank ?? '—'}
+                    </Position>
                   </TableCell>
                   <TableCell>
                     <TournamentUnit state={state} name={assignment.name} />
@@ -249,13 +268,15 @@ export function RoomScores({ state, room }: { state: TournamentState; room: numb
                   <TableCell>
                     <Badge
                       tone={
-                        status === 'Advances'
+                        status === 'Advances' || status === '▲ Promotes'
                           ? 'success'
                           : status.includes('Lucky')
                             ? 'accent'
-                            : status === 'Eliminated' || status.includes('Tie')
+                            : status === 'Eliminated' || status === '☠ Eliminated' || status.includes('Tie')
                               ? 'danger'
-                              : 'neutral'
+                              : status === '▼ Demotes'
+                                ? 'warning'
+                                : 'neutral'
                       }
                     >
                       {status}
@@ -267,7 +288,14 @@ export function RoomScores({ state, room }: { state: TournamentState; room: numb
           </tbody>
         </Table>
       </TableScroll>
-      {!round.isNoElim && !round.isFinal ? (
+      {round.isKingsValley ? (
+        <div className='rounded-b-[5px] border border-t-0 border-surface-hover bg-success-soft p-1.5 text-center text-[0.68rem] italic'>
+          ▲ Top {promoteCount} promote
+          {isBottomRoom
+            ? ` · bottom ${cutCount} eliminated`
+            : ` · bottom ${cutCount} demote to Room ${room + 1}`}
+        </div>
+      ) : !round.isNoElim && !round.isFinal ? (
         <div className='rounded-b-[5px] border border-t-0 border-surface-hover bg-success-soft p-1.5 text-center text-[0.68rem] italic'>
           ▲ Top {direct} advance directly
           {round.luckyCount ? ` · ${round.luckyCount} lucky loser spot(s) across all rooms` : ''}

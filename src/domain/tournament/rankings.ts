@@ -24,6 +24,7 @@ interface EliminatedRanking extends RankingDisplay {
   ri: number;
   round: TournamentRound;
   pct: number;
+  room?: number;
   rank: number;
 }
 
@@ -58,7 +59,7 @@ export function computeRankings(state: TournamentState): TournamentRankings | nu
   const lastRi = lastAssignedRound(state);
   if (lastRi === -1) return null;
 
-  const eliminated = new Map<string, { ri: number; round: TournamentRound; pct: number }>();
+  const eliminated = new Map<string, { ri: number; round: TournamentRound; pct: number; room?: number }>();
   for (let roundIndex = 0; roundIndex < lastRi; roundIndex += 1) {
     const round = state.rounds[roundIndex];
     if (round.isFinal) continue;
@@ -109,6 +110,7 @@ export function computeRankings(state: TournamentState): TournamentRankings | nu
               ri: roundIndex,
               round,
               pct: total > 0 ? entry.score / total : 0,
+              room: round.isKingsValley ? room : undefined,
             });
           }
         }
@@ -167,13 +169,19 @@ export function computeRankings(state: TournamentState): TournamentRankings | nu
       const info = eliminated.get(name);
       return info ? [{ name, ...info }] : [];
     })
-    .sort((first, second) => second.ri - first.ri || second.pct - first.pct);
+    .sort((first, second) => {
+      if (second.ri !== first.ri) return second.ri - first.ri;
+      if (first.room !== undefined && second.room !== undefined && first.room !== second.room) {
+        return first.room - second.room; // lower room number (closer to the top) ranks higher
+      }
+      return second.pct - first.pct;
+    });
 
   const offset = finalComplete ? finalistValues.length : 0;
   let rank = 0;
   let previousKey: string | null = null;
   const rankedEliminated = eliminatedValues.map((entry, index) => {
-    const key = `${entry.ri}|${entry.pct.toFixed(9)}`;
+    const key = `${entry.ri}|${entry.room ?? '-'}|${entry.pct.toFixed(9)}`;
     if (key !== previousKey) {
       rank = index + 1 + offset;
       previousKey = key;

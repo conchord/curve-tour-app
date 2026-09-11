@@ -13,6 +13,7 @@ import {
   type RaceDoubleEliminationConfig,
   type SharedFinalDoubleEliminationConfig,
 } from './double-elimination';
+import { kingsValleyBracketPhase, type KingsValleyConfig } from './kings-valley';
 import { singleEliminationBracketPhase, type SingleEliminationConfig } from './single-elimination';
 import type { PoolingPhaseKey, RoomSize, ScheduleLogicKey, TournamentGroup, TournamentRound } from './types';
 
@@ -39,12 +40,13 @@ export type TournamentProgressionInput =
   | (CommonGenerationInput & {
       bracketPhase: 'double-elimination-shared-final';
       format: PoolingFormatConfig & SharedFinalDoubleEliminationConfig;
+    })
+  | (CommonGenerationInput & {
+      bracketPhase: 'kings-valley';
+      format: PoolingFormatConfig & KingsValleyConfig;
     });
 
-export function getMinimumBracketUnits(
-  bracketPhase: Exclude<ScheduleLogicKey, 'kings-valley'>,
-  roomSize: RoomSize,
-): number {
+export function getMinimumBracketUnits(bracketPhase: ScheduleLogicKey, roomSize: RoomSize): number {
   return bracketPhase === 'double-elimination' ? 4 : 2 * roomSize.ideal;
 }
 
@@ -75,6 +77,9 @@ export function buildTournamentProgression(input: TournamentProgressionInput): T
       break;
     case 'double-elimination-shared-final':
       bracket = sharedFinalDoubleEliminationBracketPhase(pooled.seedTotal, pooled.nextRoundNum, input.format);
+      break;
+    case 'kings-valley':
+      bracket = kingsValleyBracketPhase(pooled.seedTotal, pooled.nextRoundNum, input.format);
       break;
   }
   return {

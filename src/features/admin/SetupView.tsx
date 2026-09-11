@@ -231,9 +231,7 @@ export function SetupView() {
                   {option.label}
                 </option>
               ))}
-              <option value='kings-valley' disabled>
-                Kings Valley (coming soon)
-              </option>
+              <option value='kings-valley'>Kings Valley</option>
             </Select>
           </Field>
           {teamSize ? (

@@ -377,3 +377,121 @@ describe('advanceTournamentRound — next-round seeding dispatch', () => {
     }
   });
 });
+
+describe('advanceTournamentRound — Kings Valley dispatch', () => {
+  it('advances via the merge + sequential-chunk path, matching kingsValleyComputeAdvancement + sequentialSeed by hand', () => {
+    const state = createDefaultTournamentState({
+      gameFormat: 'ffa-individual',
+      rounds: [
+        buildRound({
+          roundNum: 1,
+          rooms: [4, 4, 4],
+          players: 12,
+          isKingsValley: true,
+          kvPromoteCounts: [1, 1, 1],
+          kvDemoteCounts: [1, 1, 0],
+          kvEliminateCount: 2,
+        }),
+        buildRound({ roundNum: 2, rooms: [5, 5], players: 10, isKingsValley: true }),
+      ],
+      assignments: [
+        [
+          { name: 'A', room: 1, isLucky: false },
+          { name: 'B', room: 1, isLucky: false },
+          { name: 'C', room: 1, isLucky: false },
+          { name: 'D', room: 1, isLucky: false },
+          { name: 'E', room: 2, isLucky: false },
+          { name: 'F', room: 2, isLucky: false },
+          { name: 'G', room: 2, isLucky: false },
+          { name: 'H', room: 2, isLucky: false },
+          { name: 'I', room: 3, isLucky: false },
+          { name: 'J', room: 3, isLucky: false },
+          { name: 'K', room: 3, isLucky: false },
+          { name: 'L', room: 3, isLucky: false },
+        ],
+      ],
+      scores: {
+        'r0-rm1-p0': 100,
+        'r0-rm1-p1': 90,
+        'r0-rm1-p2': 80,
+        'r0-rm1-p3': 70,
+        'r0-rm2-p0': 100,
+        'r0-rm2-p1': 90,
+        'r0-rm2-p2': 80,
+        'r0-rm2-p3': 70,
+        'r0-rm3-p0': 100,
+        'r0-rm3-p1': 90,
+        'r0-rm3-p2': 80,
+        'r0-rm3-p3': 70,
+      },
+      curRound: 0,
+    });
+    const result = advanceTournamentRound(state);
+    expect(result.status).toBe('advanced');
+    if (result.status !== 'advanced') return;
+    expect(result.state.curRound).toBe(1);
+    // nextRoomOrder = [A,B,C,E,D,F,G,I,H,J] chunked into [5,5].
+    expect(result.state.assignments[1]).toEqual([
+      { name: 'A', room: 1, isLucky: false },
+      { name: 'B', room: 1, isLucky: false },
+      { name: 'C', room: 1, isLucky: false },
+      { name: 'E', room: 1, isLucky: false },
+      { name: 'D', room: 1, isLucky: false },
+      { name: 'F', room: 2, isLucky: false },
+      { name: 'G', room: 2, isLucky: false },
+      { name: 'I', room: 2, isLucky: false },
+      { name: 'H', room: 2, isLucky: false },
+      { name: 'J', room: 2, isLucky: false },
+    ]);
+    // K and L (room 3's eliminate band) are absent -- the sole elimination signal.
+    const nextNames = result.state.assignments[1].map((entry) => entry.name);
+    expect(nextNames).not.toContain('K');
+    expect(nextNames).not.toContain('L');
+  });
+
+  it('advances a Kings Valley round directly into the Final round via the same dispatch', () => {
+    const state = createDefaultTournamentState({
+      gameFormat: 'ffa-individual',
+      rounds: [
+        buildRound({
+          roundNum: 1,
+          rooms: [4, 4],
+          players: 8,
+          isKingsValley: true,
+          kvPromoteCounts: [1, 1],
+          kvDemoteCounts: [1, 0],
+          kvEliminateCount: 2,
+        }),
+        buildRound({ roundNum: 2, isFinal: true, rooms: [6], players: 6, advPerRoom: 1, advTotal: 1 }),
+      ],
+      assignments: [
+        [
+          { name: 'A', room: 1, isLucky: false },
+          { name: 'B', room: 1, isLucky: false },
+          { name: 'C', room: 1, isLucky: false },
+          { name: 'D', room: 1, isLucky: false },
+          { name: 'E', room: 2, isLucky: false },
+          { name: 'F', room: 2, isLucky: false },
+          { name: 'G', room: 2, isLucky: false },
+          { name: 'H', room: 2, isLucky: false },
+        ],
+      ],
+      scores: {
+        'r0-rm1-p0': 100,
+        'r0-rm1-p1': 90,
+        'r0-rm1-p2': 80,
+        'r0-rm1-p3': 70,
+        'r0-rm2-p0': 100,
+        'r0-rm2-p1': 90,
+        'r0-rm2-p2': 80,
+        'r0-rm2-p3': 70,
+      },
+      curRound: 0,
+    });
+    const result = advanceTournamentRound(state);
+    expect(result.status).toBe('advanced');
+    if (result.status !== 'advanced') return;
+    expect(result.state.assignments[1].map((entry) => entry.name)).toEqual(['A', 'B', 'C', 'E', 'D', 'F']);
+    expect(result.state.assignments[1].every((entry) => entry.room === 1)).toBe(true);
+  });
+});

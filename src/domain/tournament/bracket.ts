@@ -24,7 +24,9 @@ export function bracketRoundLabels(state: Pick<TournamentState, 'rounds'>): Brac
             ? `Round ${round.roundNum} (Swiss)`
             : round.isGroupStage
               ? `Round ${round.roundNum} (Group)`
-              : `Round ${round.roundNum}`;
+              : round.isKingsValley
+                ? `Round ${round.roundNum} (Kings Valley)`
+                : `Round ${round.roundNum}`;
     return { label, accent: '' };
   });
 }
@@ -150,7 +152,7 @@ export function projectFutureRoundSlots(
 
   for (let targetIndex = state.curRound + 1; targetIndex < rounds.length; targetIndex += 1) {
     const round = rounds[targetIndex];
-    if (!round || round.isGroupStage || round.pairingTBD) {
+    if (!round || round.isGroupStage || round.pairingTBD || round.isKingsValley) {
       result[targetIndex] = null;
       continue;
     }

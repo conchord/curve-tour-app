@@ -102,7 +102,7 @@ function rebuildFutureRounds(state: TournamentState): TournamentState | null {
   const config = state.gamemodeConfig as MaterializedGamemodeConfig;
   if (!config.roomSize || !config.bracketPhase) return null;
   const progression = buildTournamentProgression({
-    bracketPhase: config.bracketPhase as Exclude<MaterializedGamemodeConfig['bracketPhase'], 'kings-valley'>,
+    bracketPhase: config.bracketPhase,
     poolingPhase: state.cfg.poolingPhase ?? 'none',
     config: {
       n: rosterKeys(state.players).length,

@@ -1,40 +1,20 @@
-export type ActiveTab =
-  | "admin"
-  | "scoreboard"
-  | "bracket"
-  | "rankings"
-  | "archive";
+export type ActiveTab = 'admin' | 'scoreboard' | 'bracket' | 'rankings' | 'archive';
 
 export type GameFormatKey =
-  | "ffa-individual"
-  | "team-2v2v2v2"
-  | "team-3v3v3"
-  | "team-3v3"
-  | "last-man-standing"
-  | "individual-1v1";
+  'ffa-individual' | 'team-2v2v2v2' | 'team-3v3v3' | 'team-3v3' | 'last-man-standing' | 'individual-1v1';
 
-export type ImplementedGameFormatKey = Exclude<
-  GameFormatKey,
-  "last-man-standing"
->;
+export type ImplementedGameFormatKey = Exclude<GameFormatKey, 'last-man-standing'>;
 
 export type ScheduleLogicKey =
-  | "single-elimination"
-  | "double-elimination"
-  | "double-elimination-shared-final"
-  | "kings-valley";
+  'single-elimination' | 'double-elimination' | 'double-elimination-shared-final' | 'kings-valley';
 
-export type PoolingPhaseKey =
-  | "none"
-  | "qual-table"
-  | "swiss"
-  | "group-stage";
+export type PoolingPhaseKey = 'none' | 'qual-table' | 'swiss' | 'group-stage';
 
-export type ScoringSystemKey = "fairpoints";
-export type OddCountStrategyKey = "none" | "bye" | "flex";
-export type TeamScoringRuleKey = "sum-members" | "designated-player";
-export type RoundRobinMode = "single" | "double";
-export type BracketKey = "winners" | "losers" | "grand-final";
+export type ScoringSystemKey = 'fairpoints';
+export type OddCountStrategyKey = 'none' | 'bye' | 'flex';
+export type TeamScoringRuleKey = 'sum-members' | 'designated-player';
+export type RoundRobinMode = 'single' | 'double';
+export type BracketKey = 'winners' | 'losers' | 'grand-final';
 
 export interface TeamMember {
   name: string;
@@ -58,8 +38,8 @@ export interface RoomSize {
 export interface GameFormatDefinition {
   key: ImplementedGameFormatKey;
   label: string;
-  unitLabel: "Player" | "Team";
-  unitLabelPlural: "Players" | "Teams";
+  unitLabel: 'Player' | 'Team';
+  unitLabelPlural: 'Players' | 'Teams';
   teamSize?: number;
   defaultRoomSize?: RoomSize;
   idealRoomSize?: number;
@@ -95,6 +75,10 @@ export interface TournamentRound {
   losersTo?: number | null;
   bracketPhaseFirstRound?: boolean;
   wbFinalistName?: string;
+  isKingsValley?: boolean;
+  kvPromoteCounts?: number[];
+  kvDemoteCounts?: number[];
+  kvEliminateCount?: number;
 }
 
 export interface RoundAssignment {
@@ -168,7 +152,7 @@ export interface TournamentState {
   rounds: TournamentRound[];
   curRound: number;
   scores: Record<string, number | null>;
-  finalScores: Record<string, number | "" | null>;
+  finalScores: Record<string, number | '' | null>;
   assignments: RoundAssignment[][];
   luckyLosers: string[][];
   byes: string[][];
@@ -204,13 +188,13 @@ export interface PersistedSetup {
   grandFinalLbTarget: string;
   semisOverride: string;
   finalOverride: string;
-  oddCountStrategy: OddCountStrategyKey | "";
-  teamScoringRule: TeamScoringRuleKey | "";
+  oddCountStrategy: OddCountStrategyKey | '';
+  teamScoringRule: TeamScoringRuleKey | '';
   roster: string;
   reserves: string;
   reserveIndividuals: string;
   /** Compatibility field used by saves from before poolingPhase existed. */
-  qual?: "yes" | "no";
+  qual?: 'yes' | 'no';
 }
 
 export interface PersistedTournamentEnvelope {

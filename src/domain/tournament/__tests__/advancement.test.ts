@@ -8,6 +8,7 @@ import {
   hasPendingTies,
   invalidateStaleTieResolutions,
   isTieResolved,
+  kingsValleyComputeAdvancement,
   roomBasedComputeAdvancement,
 } from '../advancement';
 import { createDefaultTournamentState } from '../state-defaults';
@@ -592,5 +593,109 @@ describe('computeLuckyLoserStandings', () => {
     const standings = computeLuckyLoserStandings(state, 0);
     expect(standings?.map((entry) => entry.name)).toEqual(['E', 'B', 'H']);
     expect(standings?.map((entry) => entry.leading)).toEqual([true, false, false]);
+  });
+});
+
+describe('kingsValleyComputeAdvancement', () => {
+  it('merges a 3-room round exactly per the hand-derived promote/stay/demote-or-eliminate bands', () => {
+    // Room1(top) 4: A>B>C>D. Room2 4: E>F>G>H. Room3(bottom) 4: I>J>K>L.
+    // promote=1/demote=1 for rooms 1-2; room3 promote=1/eliminate=2.
+    // Room1_next = own-promote[A] + own-stay[B,C] + room2-promote-inflow[E]
+    // Room2_next = room1-demote-inflow[D] + own-stay[F,G] + room3-promote-inflow[I]
+    // Room3_next = room2-demote-inflow[H] + own-stay[J]  (room3's own promote/eliminate excluded)
+    const state = createDefaultTournamentState({
+      gameFormat: 'ffa-individual',
+      rounds: [
+        buildRound({
+          roundNum: 1,
+          rooms: [4, 4, 4],
+          players: 12,
+          isKingsValley: true,
+          kvPromoteCounts: [1, 1, 1],
+          kvDemoteCounts: [1, 1, 0],
+          kvEliminateCount: 2,
+        }),
+      ],
+      assignments: [
+        [
+          { name: 'A', room: 1, isLucky: false },
+          { name: 'B', room: 1, isLucky: false },
+          { name: 'C', room: 1, isLucky: false },
+          { name: 'D', room: 1, isLucky: false },
+          { name: 'E', room: 2, isLucky: false },
+          { name: 'F', room: 2, isLucky: false },
+          { name: 'G', room: 2, isLucky: false },
+          { name: 'H', room: 2, isLucky: false },
+          { name: 'I', room: 3, isLucky: false },
+          { name: 'J', room: 3, isLucky: false },
+          { name: 'K', room: 3, isLucky: false },
+          { name: 'L', room: 3, isLucky: false },
+        ],
+      ],
+      scores: {
+        'r0-rm1-p0': 100,
+        'r0-rm1-p1': 90,
+        'r0-rm1-p2': 80,
+        'r0-rm1-p3': 70,
+        'r0-rm2-p0': 100,
+        'r0-rm2-p1': 90,
+        'r0-rm2-p2': 80,
+        'r0-rm2-p3': 70,
+        'r0-rm3-p0': 100,
+        'r0-rm3-p1': 90,
+        'r0-rm3-p2': 80,
+        'r0-rm3-p3': 70,
+      },
+    });
+    const { nextRoomOrder, eliminatedNames } = kingsValleyComputeAdvancement(state, 0);
+    expect(nextRoomOrder).toEqual(['A', 'B', 'C', 'E', 'D', 'F', 'G', 'I', 'H', 'J']);
+    expect(eliminatedNames).toEqual(['K', 'L']);
+  });
+
+  it("redirects the top room's own promote band to the front of its own next-round list (not dropped), and the bottom room gets no inflow from below", () => {
+    // Room1(top) 4: A>B>C>D. Room2(bottom) 4: E>F>G>H.
+    // promote=1/demote=1 for room1; room2 promote=1/eliminate=2.
+    const state = createDefaultTournamentState({
+      gameFormat: 'ffa-individual',
+      rounds: [
+        buildRound({
+          roundNum: 1,
+          rooms: [4, 4],
+          players: 8,
+          isKingsValley: true,
+          kvPromoteCounts: [1, 1],
+          kvDemoteCounts: [1, 0],
+          kvEliminateCount: 2,
+        }),
+      ],
+      assignments: [
+        [
+          { name: 'A', room: 1, isLucky: false },
+          { name: 'B', room: 1, isLucky: false },
+          { name: 'C', room: 1, isLucky: false },
+          { name: 'D', room: 1, isLucky: false },
+          { name: 'E', room: 2, isLucky: false },
+          { name: 'F', room: 2, isLucky: false },
+          { name: 'G', room: 2, isLucky: false },
+          { name: 'H', room: 2, isLucky: false },
+        ],
+      ],
+      scores: {
+        'r0-rm1-p0': 100,
+        'r0-rm1-p1': 90,
+        'r0-rm1-p2': 80,
+        'r0-rm1-p3': 70,
+        'r0-rm2-p0': 100,
+        'r0-rm2-p1': 90,
+        'r0-rm2-p2': 80,
+        'r0-rm2-p3': 70,
+      },
+    });
+    const { nextRoomOrder, eliminatedNames } = kingsValleyComputeAdvancement(state, 0);
+    // A (room1's own promote band) leads, followed by room1's stay band, then
+    // room2's promote band feeding in from below; then room1's demote band
+    // feeding room2, then room2's own stay band, with no room-3 inflow.
+    expect(nextRoomOrder).toEqual(['A', 'B', 'C', 'E', 'D', 'F']);
+    expect(eliminatedNames).toEqual(['G', 'H']);
   });
 });

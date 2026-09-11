@@ -3,6 +3,7 @@ import {
   avoidSameGroupInFirstBracketRound,
   randomSeed,
   selectPoolingBye,
+  sequentialSeed,
   snakeSeed,
   swissFoldPair,
 } from '../seeding';
@@ -237,6 +238,34 @@ describe('swissFoldPair', () => {
       { name: 'P2', room: 1, isLucky: false },
       { name: 'P3', room: 2, isLucky: false },
       { name: 'P4', room: 2, isLucky: false },
+    ]);
+  });
+});
+
+describe('sequentialSeed', () => {
+  it('slices an already-ordered list into consecutive room-sized chunks, no reordering', () => {
+    expect(sequentialSeed(['A', 'B', 'C', 'D'], [2, 2])).toEqual([
+      { name: 'A', room: 1, isLucky: false },
+      { name: 'B', room: 1, isLucky: false },
+      { name: 'C', room: 2, isLucky: false },
+      { name: 'D', room: 2, isLucky: false },
+    ]);
+  });
+
+  it('handles uneven chunk sizes', () => {
+    expect(sequentialSeed(['A', 'B', 'C', 'D', 'E'], [3, 2])).toEqual([
+      { name: 'A', room: 1, isLucky: false },
+      { name: 'B', room: 1, isLucky: false },
+      { name: 'C', room: 1, isLucky: false },
+      { name: 'D', room: 2, isLucky: false },
+      { name: 'E', room: 2, isLucky: false },
+    ]);
+  });
+
+  it('stops cleanly rather than crashing when fewer names are supplied than total room capacity', () => {
+    expect(sequentialSeed(['A', 'B'], [2, 2])).toEqual([
+      { name: 'A', room: 1, isLucky: false },
+      { name: 'B', room: 1, isLucky: false },
     ]);
   });
 });

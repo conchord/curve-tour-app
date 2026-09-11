@@ -33,6 +33,27 @@ export function snakeSeed(candidates: Array<string | SeedCandidate>, roomCount: 
   return assignments;
 }
 
+/**
+ * Slices an already-ordered (best-to-worst) list of names into consecutive
+ * chunks matching `roomSizes` -- unlike snakeSeed, this does not reorder or
+ * interleave anything, since the input is already globally meaningful (Kings
+ * Valley's per-room promote/stay/demote merge). The target round's room
+ * sizes are decided independently at generation time and are trusted as-is.
+ */
+export function sequentialSeed(orderedNames: string[], roomSizes: number[]): RoundAssignment[] {
+  const assignments: RoundAssignment[] = [];
+  let index = 0;
+  for (const [roomIndex, size] of roomSizes.entries()) {
+    for (let position = 0; position < size; position += 1) {
+      const name = orderedNames[index];
+      index += 1;
+      if (name === undefined) continue;
+      assignments.push({ name, room: roomIndex + 1, isLucky: false });
+    }
+  }
+  return assignments;
+}
+
 export function randomSeed(names: string[], rooms: number[], random: RandomSource): RoundAssignment[] {
   const shuffled = [...names];
   for (let index = shuffled.length - 1; index > 0; index -= 1) {

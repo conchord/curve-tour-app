@@ -471,3 +471,51 @@ export function computeLuckyLoserStandings(
     .sort((first, second) => second.pct - first.pct)
     .map((entry, index) => ({ ...entry, leading: index < round.luckyCount }));
 }
+
+/**
+ * Kings Valley's per-room promote/stay/demote-or-eliminate split, merged into
+ * one flat best-to-worst survivor order. Room i's next-round population is
+ * (room i's own stay band) + (room i's own promote band, only for room 1,
+ * which has nowhere to promote to) + (room i-1's demote band) + (room i+1's
+ * promote band) -- each room's promote/demote band is counted in exactly one
+ * of those places, never duplicated or dropped. The bottom room's cut band
+ * is excluded from the merge entirely (surfaced only via eliminatedNames).
+ */
+export function kingsValleyComputeAdvancement(
+  state: TournamentState,
+  roundIndex: number,
+): { nextRoomOrder: string[]; eliminatedNames: string[] } {
+  const round = state.rounds[roundIndex];
+  const roomCount = round.rooms.length;
+  const promoteBands: string[][] = [];
+  const demoteBands: string[][] = []; // bottom room's entry is its eliminate band
+  const stayBands: string[][] = [];
+
+  for (let room = 1; room <= roomCount; room += 1) {
+    const index = room - 1;
+    const names = orderRoomByScore(scoreRoom(state, roundIndex, room, 0), roundIndex, room, state).map(
+      (entry) => entry.name,
+    );
+    const promoteCount = round.kvPromoteCounts?.[index] ?? 0;
+    const isBottom = room === roomCount;
+    const cutCount = isBottom ? (round.kvEliminateCount ?? 0) : (round.kvDemoteCounts?.[index] ?? 0);
+    promoteBands.push(names.slice(0, promoteCount));
+    stayBands.push(names.slice(promoteCount, names.length - cutCount));
+    demoteBands.push(names.slice(names.length - cutCount));
+  }
+
+  const nextRoomOrder: string[] = [];
+  for (let room = 1; room <= roomCount; room += 1) {
+    const index = room - 1;
+    const isTop = room === 1;
+    const isBottom = room === roomCount;
+    nextRoomOrder.push(
+      ...(isTop ? [] : demoteBands[index - 1]),
+      ...(isTop ? promoteBands[index] : []),
+      ...stayBands[index],
+      ...(isBottom ? [] : promoteBands[index + 1]),
+    );
+  }
+
+  return { nextRoomOrder, eliminatedNames: demoteBands[roomCount - 1] };
+}

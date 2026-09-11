@@ -133,12 +133,17 @@ function TeamScoreFields({ children }: { children: ReactNode }) {
   );
 }
 
-function resultClasses(result: 'advance' | 'eliminate' | 'lucky' | 'pending' | '', followed: boolean) {
+function resultClasses(
+  result: 'advance' | 'eliminate' | 'lucky' | 'pending' | 'promote' | 'stay' | 'demote' | '',
+  followed: boolean,
+) {
   return cn(
     result === 'advance' && 'border-l-success text-success',
     result === 'eliminate' && 'border-l-surface-hover text-muted line-through opacity-50',
     result === 'lucky' && 'border-l-accent text-accent',
     result === 'pending' && 'border-l-danger text-danger no-underline opacity-85',
+    result === 'promote' && 'border-l-success text-success',
+    result === 'demote' && 'border-l-warning text-warning',
     followed && 'bg-primary-soft shadow-[inset_0_0_0_1px_rgb(0_229_255_/_27%)]',
   );
 }
@@ -313,6 +318,31 @@ function LuckyLoserStandingsPanel({ state, roundIndex }: { state: TournamentStat
   );
 }
 
+function KingsValleyDisclaimer({ round }: { round: TournamentRound }) {
+  return (
+    <div className='mb-2 rounded-md border border-accent/30 bg-accent/5 px-2.5 py-1.5 text-[0.68rem] text-muted'>
+      <span className='font-semibold text-accent'>⛰ Kings Valley: </span>
+      Top finishers promote to the room above, bottom finishers demote to the room below (the bottom room's
+      demoted are eliminated instead), the rest stay.
+      <div className='mt-1 grid gap-0.5'>
+        {round.rooms.map((size, roomIndex) => {
+          const isBottom = roomIndex === round.rooms.length - 1;
+          const promote = round.kvPromoteCounts?.[roomIndex] ?? 0;
+          const cut = isBottom ? (round.kvEliminateCount ?? 0) : (round.kvDemoteCounts?.[roomIndex] ?? 0);
+          const stay = size - promote - cut;
+          return (
+            <div key={roomIndex}>
+              Room {roomIndex + 1} ({size}): top {promote} promote,{' '}
+              {isBottom ? `bottom ${cut} are eliminated` : `bottom ${cut} demote to Room ${roomIndex + 2}`},{' '}
+              {stay} stay.
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function PlaceholderRound({
   round,
   state,
@@ -374,6 +404,7 @@ function PlaceholderRound({
         );
       })}
       {round.luckyCount > 0 && !round.isNoElim ? <LuckyLoserDisclaimer round={round} /> : null}
+      {round.isKingsValley ? <KingsValleyDisclaimer round={round} /> : null}
       {round.pairingTBD ? (
         <div className='mt-1.5 text-[0.68rem] text-warning'>Pairings determined live</div>
       ) : null}
@@ -435,6 +466,11 @@ function RoundBody({
         const room = roomIndex + 1;
         const units = assignments.filter((entry) => entry.room === room);
         const direct = round.isNoElim ? units.length : (round.advPerRoom ?? 0);
+        const isBottomRoom = round.isKingsValley && roomIndex === round.rooms.length - 1;
+        const promoteCount = round.kvPromoteCounts?.[roomIndex] ?? 0;
+        const cutCount = isBottomRoom
+          ? (round.kvEliminateCount ?? 0)
+          : (round.kvDemoteCounts?.[roomIndex] ?? 0);
         const scored = units.map((entry, position) => ({
           name: entry.name,
           position,
@@ -462,13 +498,21 @@ function RoundBody({
               const pending = showResults && pendingTieNames.has(entry.name);
               const result = pending
                 ? 'pending'
-                : showResults
-                  ? lucky
-                    ? 'lucky'
-                    : advances
-                      ? 'advance'
-                      : 'eliminate'
-                  : '';
+                : !showResults
+                  ? ''
+                  : round.isKingsValley
+                    ? index < promoteCount
+                      ? 'promote'
+                      : index >= display.length - cutCount
+                        ? isBottomRoom
+                          ? 'eliminate'
+                          : 'demote'
+                        : 'stay'
+                    : lucky
+                      ? 'lucky'
+                      : advances
+                        ? 'advance'
+                        : 'eliminate';
               const followed = followKey === entry.name;
               const badges = (
                 <>
@@ -555,6 +599,7 @@ function RoundBody({
       {round.luckyCount > 0 && !round.isNoElim && roundIndex === state.curRound ? (
         <LuckyLoserStandingsPanel state={state} roundIndex={roundIndex} />
       ) : null}
+      {round.isKingsValley ? <KingsValleyDisclaimer round={round} /> : null}
       {(state.byes[roundIndex] ?? []).map((name) => (
         <div
           className={cn(

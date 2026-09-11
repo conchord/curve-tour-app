@@ -448,3 +448,25 @@ describe('generateTournament -- end-to-end anchors', () => {
     expect(result.state.assignments[0].map((a) => a.name).sort()).toEqual(names(16).sort());
   });
 });
+
+describe('generateTournament -- kings-valley', () => {
+  it('generates successfully (no longer rejected as "not available yet") and ends in a Final', () => {
+    const state = createDefaultTournamentState({ confirmedCount: 37, players: names(37) });
+    const form = createDefaultSetup({ gameFormat: 'ffa-individual', scheduleLogic: 'kings-valley' });
+    const result = generateTournament(state, form, createTournamentRuntime({ ids: fixedIdSource() }));
+    expect(result.status).toBe('generated');
+    if (result.status !== 'generated') return;
+    // Default poolingPhase is 'none' -- a fixed 2-round no-elim warmup precedes
+    // the Kings Valley phase, matching every other schedule logic's convention.
+    expect(result.state.rounds[2].isKingsValley).toBe(true);
+    expect(result.state.rounds[result.state.rounds.length - 1].isFinal).toBe(true);
+    expect(result.state.assignments[0].map((a) => a.name).sort()).toEqual(names(37).sort());
+  });
+
+  it('generates for a head-to-head format too (no compatibility gate)', () => {
+    const state = createDefaultTournamentState({ confirmedCount: 8, players: names(8) });
+    const form = createDefaultSetup({ gameFormat: 'individual-1v1', scheduleLogic: 'kings-valley' });
+    const result = generateTournament(state, form, createTournamentRuntime({ ids: fixedIdSource() }));
+    expect(result.status).toBe('generated');
+  });
+});

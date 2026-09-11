@@ -49,9 +49,6 @@ export function generateTournament(
   }
   const format = getGameFormat(form.gameFormat);
   if (!format) return generationError('This game format is not available yet.');
-  if (form.scheduleLogic === 'kings-valley') {
-    return generationError('This schedule logic is not available yet.');
-  }
   const schedule = form.scheduleLogic;
   const floorIdeal = format.defaultRoomSize?.ideal ?? format.idealRoomSize;
   if (!floorIdeal) return generationError('This game format has no room size.');

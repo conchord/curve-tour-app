@@ -1,10 +1,18 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { detectTieBreaks, getAllTies, isTieResolved } from '../../domain/tournament/advancement';
+import {
+  computeLuckyLoserStandings,
+  detectTieBreaks,
+  getAllTies,
+  isTieResolved,
+} from '../../domain/tournament/advancement';
 import {
   bracketFollowStatus,
   bracketRoundDefaultCollapsed,
   bracketRoundLabels,
+  projectedSlotLabelText,
+  projectFutureRoundSlots,
   type BracketFollowStatus,
+  type ProjectedSlotLabel,
 } from '../../domain/tournament/bracket';
 import { finalsProgressState } from '../../domain/tournament/finals';
 import { getGameFormat } from '../../domain/tournament/formats';
@@ -269,26 +277,103 @@ function FinalColumn({
   );
 }
 
-function PlaceholderRound({ round }: { round: TournamentRound }) {
-  if (!round.rooms.length) return <div className='text-muted'>Not yet seeded</div>;
+function LuckyLoserDisclaimer({ round }: { round: TournamentRound }) {
+  const direct = round.advPerRoom ?? 0;
   return (
-    <>
-      {round.rooms.map((slots, roomIndex) => (
-        <div className='mb-2' key={roomIndex}>
-          <RoomLabel>
-            {round.isGroupStage ? `Group ${round.roomGroups?.[roomIndex]} · ` : ''}Room {roomIndex + 1} (
-            {slots})
-          </RoomLabel>
-          {Array.from({ length: slots }, (_, slot) => (
-            <div
-              className={cn(bracketRowBase, 'border-l-surface-hover border-l-dashed text-muted opacity-65')}
-              key={slot}
-            >
-              —
-            </div>
-          ))}
+    <div className='mb-2 rounded-md border border-accent/30 bg-accent/5 px-2.5 py-1.5 text-[0.68rem] text-muted'>
+      <span className='font-semibold text-accent'>★ Lucky loser{round.luckyCount === 1 ? '' : 's'}: </span>
+      Top {direct} advance{direct === 1 ? 's' : ''} directly from each room. {round.luckyCount} extra spot
+      {round.luckyCount === 1 ? '' : 's'} go{round.luckyCount === 1 ? 'es' : ''} to whoever's next-best
+      finisher scores highest as a share of their own room's total — compared across every room.
+    </div>
+  );
+}
+
+function LuckyLoserStandingsPanel({ state, roundIndex }: { state: TournamentState; roundIndex: number }) {
+  const standings = computeLuckyLoserStandings(state, roundIndex);
+  if (!standings?.length) return null;
+  return (
+    <div className='mb-2 rounded-md border border-accent/30 bg-accent/5 px-2.5 py-1.5 text-[0.68rem]'>
+      <div className='mb-1 font-semibold tracking-[0.05em] text-accent uppercase'>Lucky loser race</div>
+      {standings.map((entry) => (
+        <div
+          className={cn(
+            'flex items-center justify-between gap-2 py-px',
+            entry.leading ? 'font-semibold text-accent' : 'text-muted',
+          )}
+          key={entry.name}
+        >
+          <span className='min-w-0 flex-1 truncate'>
+            {entry.leading ? '★ ' : ''}Room {entry.room} · {unitDisplay(state, entry.name).label}
+          </span>
+          <span>{(entry.pct * 100).toFixed(1)}%</span>
         </div>
       ))}
+    </div>
+  );
+}
+
+function PlaceholderRound({
+  round,
+  state,
+  projected,
+}: {
+  round: TournamentRound;
+  state: TournamentState;
+  projected: ProjectedSlotLabel[][] | null;
+}) {
+  if (!round.rooms.length) return <div className='text-muted'>Not yet seeded</div>;
+  if (round.isGroupStage) {
+    return (
+      <>
+        {(round.matches ?? []).map((match, roomIndex) => (
+          <div className='mb-2' key={roomIndex}>
+            <RoomLabel>
+              Group {match.group} · Room {roomIndex + 1} ({round.rooms[roomIndex]})
+            </RoomLabel>
+            {match.pair.map((name) => (
+              <div
+                className={cn(bracketRowBase, 'border-l-surface-hover border-l-dashed text-muted opacity-65')}
+                key={name}
+              >
+                {unitDisplay(state, name).label}
+              </div>
+            ))}
+          </div>
+        ))}
+        {(round.groupByes ?? []).map((name) => (
+          <div
+            className='mb-2.5 rounded-lg border border-dashed border-warning bg-surface-low px-2.5 py-2 text-xs text-warning'
+            key={name}
+          >
+            <span className='mr-1.5 font-bold tracking-[0.05em]'>BYE</span>
+            {unitDisplay(state, name).label}
+          </div>
+        ))}
+      </>
+    );
+  }
+  return (
+    <>
+      {round.rooms.map((slots, roomIndex) => {
+        const roomLabels = projected?.[roomIndex] ?? null;
+        return (
+          <div className='mb-2' key={roomIndex}>
+            <RoomLabel>
+              Room {roomIndex + 1} ({slots})
+            </RoomLabel>
+            {Array.from({ length: slots }, (_, slot) => (
+              <div
+                className={cn(bracketRowBase, 'border-l-surface-hover border-l-dashed text-muted opacity-65')}
+                key={slot}
+              >
+                {roomLabels?.[slot] ? projectedSlotLabelText(roomLabels[slot]) : '—'}
+              </div>
+            ))}
+          </div>
+        );
+      })}
+      {round.luckyCount > 0 && !round.isNoElim ? <LuckyLoserDisclaimer round={round} /> : null}
       {round.pairingTBD ? (
         <div className='mt-1.5 text-[0.68rem] text-warning'>Pairings determined live</div>
       ) : null}
@@ -309,15 +394,17 @@ function RoundBody({
   roundIndex,
   editable,
   followKey,
+  projected,
 }: {
   state: TournamentState;
   roundIndex: number;
   editable: boolean;
   followKey: string | null;
+  projected: ProjectedSlotLabel[][] | null;
 }) {
   const round = state.rounds[roundIndex];
   const assignments = state.assignments[roundIndex] ?? [];
-  if (!assignments.length) return <PlaceholderRound round={round} />;
+  if (!assignments.length) return <PlaceholderRound round={round} state={state} projected={projected} />;
   if (round.isFinal)
     return (
       <FinalColumn
@@ -464,6 +551,10 @@ function RoundBody({
           </div>
         );
       })}
+      {round.luckyCount > 0 && !round.isNoElim ? <LuckyLoserDisclaimer round={round} /> : null}
+      {round.luckyCount > 0 && !round.isNoElim && roundIndex === state.curRound ? (
+        <LuckyLoserStandingsPanel state={state} roundIndex={roundIndex} />
+      ) : null}
       {(state.byes[roundIndex] ?? []).map((name) => (
         <div
           className={cn(
@@ -563,6 +654,7 @@ export function BracketView() {
   useEffect(() => setCollapse({}), [app.state.tournamentId]);
   const follow = useMemo(() => bracketFollowStatus(app.state, followKey), [app.state, followKey]);
   const labels = bracketRoundLabels(app.state);
+  const projectedSlots = useMemo(() => projectFutureRoundSlots(app.state), [app.state]);
   if (!app.state.rounds.length)
     return <Alert>Start a tournament in Admin to see the bracket overview.</Alert>;
   const editable = app.unlocked && !app.isViewer && app.state.started;
@@ -631,6 +723,7 @@ export function BracketView() {
                 roundIndex={roundIndex}
                 editable={editable}
                 followKey={followKey}
+                projected={projectedSlots[roundIndex] ?? null}
               />
             </RoundColumn>
           );
@@ -642,6 +735,7 @@ export function BracketView() {
 
 export function ArchivedBracket({ state }: { state: TournamentState }) {
   const labels = bracketRoundLabels(state);
+  const projectedSlots = projectFutureRoundSlots(state);
   return (
     <div className='flex max-w-full gap-3.5 overflow-x-auto pb-3'>
       {state.rounds.map((_, roundIndex) => (
@@ -651,7 +745,13 @@ export function ArchivedBracket({ state }: { state: TournamentState }) {
           label={labels[roundIndex]?.label}
           roundIndex={roundIndex}
         >
-          <RoundBody state={state} roundIndex={roundIndex} editable={false} followKey={null} />
+          <RoundBody
+            state={state}
+            roundIndex={roundIndex}
+            editable={false}
+            followKey={null}
+            projected={projectedSlots[roundIndex] ?? null}
+          />
         </RoundColumn>
       ))}
     </div>

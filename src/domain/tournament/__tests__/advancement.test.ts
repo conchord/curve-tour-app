@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   computeGroupStandings,
+  computeLuckyLoserStandings,
   computeQualificationStandings,
   detectTieBreaks,
   doubleEliminationComputeAdvancement,
@@ -459,5 +460,137 @@ describe('doubleEliminationComputeAdvancement', () => {
     expect(result.winners.map((entry) => entry.name)).toContain('P7');
     expect(result.losers.map((entry) => entry.name)).not.toContain('P7');
     expect(result.losers.map((entry) => entry.name)).toEqual(['P8', 'Q7', 'Q8']);
+  });
+});
+
+describe('computeLuckyLoserStandings', () => {
+  it("ranks each room's near-miss candidate by score share of their own room total, leading = top luckyCount", () => {
+    const state = createDefaultTournamentState({
+      gameFormat: 'ffa-individual',
+      rounds: [buildRound({ roundNum: 1, rooms: [3, 3, 3], players: 9, advPerRoom: 1, luckyCount: 1 })],
+      assignments: [
+        [
+          { name: 'A', room: 1, isLucky: false },
+          { name: 'B', room: 1, isLucky: false },
+          { name: 'C', room: 1, isLucky: false },
+          { name: 'D', room: 2, isLucky: false },
+          { name: 'E', room: 2, isLucky: false },
+          { name: 'F', room: 2, isLucky: false },
+          { name: 'G', room: 3, isLucky: false },
+          { name: 'H', room: 3, isLucky: false },
+          { name: 'I', room: 3, isLucky: false },
+        ],
+      ],
+      scores: {
+        'r0-rm1-p0': 100,
+        'r0-rm1-p1': 90, // candidate: 90/200 = 0.45
+        'r0-rm1-p2': 10,
+        'r0-rm2-p0': 100,
+        'r0-rm2-p1': 95, // candidate: 95/200 = 0.475 — leading
+        'r0-rm2-p2': 5,
+        'r0-rm3-p0': 50,
+        'r0-rm3-p1': 10, // candidate: 10/61 ≈ 0.164
+        'r0-rm3-p2': 1,
+      },
+    });
+    const standings = computeLuckyLoserStandings(state, 0);
+    expect(standings?.map((entry) => entry.name)).toEqual(['E', 'B', 'H']);
+    expect(standings?.map((entry) => entry.leading)).toEqual([true, false, false]);
+    expect(standings?.[0].room).toBe(2);
+    expect(standings?.[0].pct).toBeCloseTo(0.475);
+  });
+
+  it('returns null for isNoElim, isFinal, and zero-luckyCount rounds', () => {
+    const base = createDefaultTournamentState({
+      gameFormat: 'ffa-individual',
+      assignments: [[{ name: 'A', room: 1, isLucky: false }]],
+      scores: { 'r0-rm1-p0': 100 },
+    });
+    expect(
+      computeLuckyLoserStandings(
+        { ...base, rounds: [buildRound({ roundNum: 1, rooms: [1], isNoElim: true, luckyCount: 1 })] },
+        0,
+      ),
+    ).toBeNull();
+    expect(
+      computeLuckyLoserStandings(
+        { ...base, rounds: [buildRound({ roundNum: 1, rooms: [1], isFinal: true, luckyCount: 1 })] },
+        0,
+      ),
+    ).toBeNull();
+    expect(
+      computeLuckyLoserStandings(
+        { ...base, rounds: [buildRound({ roundNum: 1, rooms: [1], luckyCount: 0 })] },
+        0,
+      ),
+    ).toBeNull();
+  });
+
+  it('excludes a room with zero total score instead of including it as non-leading', () => {
+    const state = createDefaultTournamentState({
+      gameFormat: 'ffa-individual',
+      rounds: [buildRound({ roundNum: 1, rooms: [2, 2], players: 4, advPerRoom: 1, luckyCount: 1 })],
+      assignments: [
+        [
+          { name: 'P1', room: 1, isLucky: false },
+          { name: 'P2', room: 1, isLucky: false },
+          { name: 'P3', room: 2, isLucky: false },
+          { name: 'P4', room: 2, isLucky: false },
+        ],
+      ],
+      scores: {
+        'r0-rm1-p0': 0,
+        'r0-rm1-p1': 0,
+        'r0-rm2-p0': 10,
+        'r0-rm2-p1': 5,
+      },
+    });
+    const standings = computeLuckyLoserStandings(state, 0);
+    expect(standings).toHaveLength(1);
+    expect(standings?.[0].name).toBe('P4');
+    expect(standings?.[0].leading).toBe(true);
+  });
+
+  it('applies identically to a double-elimination losers-bracket round — no bracket-side branching needed', () => {
+    const state = createDefaultTournamentState({
+      gameFormat: 'ffa-individual',
+      rounds: [
+        buildRound({
+          roundNum: 1,
+          rooms: [3, 3, 3],
+          players: 9,
+          advPerRoom: 1,
+          luckyCount: 1,
+          bracket: 'losers',
+        }),
+      ],
+      assignments: [
+        [
+          { name: 'A', room: 1, isLucky: false },
+          { name: 'B', room: 1, isLucky: false },
+          { name: 'C', room: 1, isLucky: false },
+          { name: 'D', room: 2, isLucky: false },
+          { name: 'E', room: 2, isLucky: false },
+          { name: 'F', room: 2, isLucky: false },
+          { name: 'G', room: 3, isLucky: false },
+          { name: 'H', room: 3, isLucky: false },
+          { name: 'I', room: 3, isLucky: false },
+        ],
+      ],
+      scores: {
+        'r0-rm1-p0': 100,
+        'r0-rm1-p1': 90,
+        'r0-rm1-p2': 10,
+        'r0-rm2-p0': 100,
+        'r0-rm2-p1': 95,
+        'r0-rm2-p2': 5,
+        'r0-rm3-p0': 50,
+        'r0-rm3-p1': 10,
+        'r0-rm3-p2': 1,
+      },
+    });
+    const standings = computeLuckyLoserStandings(state, 0);
+    expect(standings?.map((entry) => entry.name)).toEqual(['E', 'B', 'H']);
+    expect(standings?.map((entry) => entry.leading)).toEqual([true, false, false]);
   });
 });

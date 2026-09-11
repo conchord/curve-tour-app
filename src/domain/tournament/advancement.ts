@@ -429,3 +429,45 @@ export function doubleEliminationComputeAdvancement(
     luckyNames,
   };
 }
+
+export interface LuckyLoserStanding {
+  name: string;
+  room: number;
+  score: number;
+  roomTotal: number;
+  pct: number;
+  leading: boolean;
+}
+
+/**
+ * Live, score-dependent ranking of every room's near-miss "lucky loser" candidate for
+ * a room-based round (single-elimination/Semis, or a double-elimination WB/LB round).
+ * Returns null for rounds where the lucky-loser mechanism structurally cannot apply.
+ */
+export function computeLuckyLoserStandings(
+  state: TournamentState,
+  roundIndex: number,
+): LuckyLoserStanding[] | null {
+  const round = state.rounds[roundIndex];
+  if (!round || round.isNoElim || round.isFinal || round.luckyCount <= 0) return null;
+
+  const advPerRoom = round.advPerRoom ?? 0;
+  const candidates: Omit<LuckyLoserStanding, 'leading'>[] = [];
+  for (let room = 1; room <= round.rooms.length; room += 1) {
+    const scored = orderRoomByScore(scoreRoom(state, roundIndex, room, 0), roundIndex, room, state);
+    const candidate = luckyLoserCandidate(scored, advPerRoom);
+    if (!candidate) continue;
+    const roomTotal = scored.reduce((total, entry) => total + entry.score, 0);
+    candidates.push({
+      name: candidate.name,
+      room,
+      score: scored[advPerRoom].score,
+      roomTotal,
+      pct: candidate.pct,
+    });
+  }
+
+  return [...candidates]
+    .sort((first, second) => second.pct - first.pct)
+    .map((entry, index) => ({ ...entry, leading: index < round.luckyCount }));
+}

@@ -242,13 +242,15 @@ export function projectFutureRoundSlots(
     }
 
     // Chunk the pool directly into round.rooms' declared sizes rather than
-    // mirroring snakeSeed's count-only boustrophedon bounce -- the real
-    // transition still seeds via snakeSeed (unchanged here), so a projected
-    // room's contents can drift slightly from what actually lands there once
-    // the round is reached. That drift is accepted as the honest tradeoff:
-    // every projected slot always matches its own room's displayed size
-    // exactly (no more blank dashes or invisible overflow into another
-    // room), which is the property this display is for.
+    // trying to mirror the real transition's own diversity/recency-aware
+    // wave-based seeding (tieredSeed/tieredBracketSeed, seeding.ts) --
+    // that seeding depends on live match history and per-round scores this
+    // display doesn't have and shouldn't need. So a projected room's
+    // contents can drift from what actually lands there once the round is
+    // reached. That drift is accepted as the honest tradeoff: every
+    // projected slot always matches its own room's displayed size exactly
+    // (no more blank dashes or invisible overflow into another room), which
+    // is the property this display is for.
     const seeded = sequentialSeed(
       pool.map((_, index) => String(index)),
       round.rooms,

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   assignWaveToRooms,
   avoidSameGroupInFirstBracketRound,
+  doubleEliminationApproachProgress,
   randomSeed,
   recencyWeight,
   RECENCY_REPEAT_WEIGHT_K,
@@ -11,6 +12,7 @@ import {
   sequentialSeed,
   snakeSeed,
   swissFoldPair,
+  tieredBracketSeed,
   tieredSeed,
 } from '../seeding';
 import { createDefaultTournamentState } from '../state-defaults';
@@ -471,5 +473,124 @@ describe('tieredSeed', () => {
       [1, 3],
       [2, 2],
     ]);
+  });
+});
+
+describe('doubleEliminationApproachProgress', () => {
+  // Mirrors a real interleaved WB/LB/grand-final sequence: wb0, lb0, wb1,
+  // lb1, wb2, gf -- 3 winners-bracket rounds (indices 0, 2, 4), 2
+  // losers-bracket rounds (indices 1, 3), one grand-final (index 5).
+  const rounds = [
+    buildRound({ roundNum: 1, bracket: 'winners', rooms: [2, 2], players: 4 }),
+    buildRound({ roundNum: 2, bracket: 'losers', rooms: [2], players: 2 }),
+    buildRound({ roundNum: 3, bracket: 'winners', rooms: [2], players: 2 }),
+    buildRound({ roundNum: 4, bracket: 'losers', rooms: [1], players: 1 }),
+    buildRound({ roundNum: 5, bracket: 'winners', rooms: [1], players: 1 }),
+    buildRound({ roundNum: 6, bracket: 'grand-final', isFinal: true, rooms: [2], players: 2 }),
+  ];
+
+  it("rises linearly across a bracket side's own rounds, independent of the other side", () => {
+    expect(doubleEliminationApproachProgress(rounds, 0)).toBe(0); // wb0: first of 3 winners rounds
+    expect(doubleEliminationApproachProgress(rounds, 2)).toBe(0.5); // wb1: middle of 3
+    expect(doubleEliminationApproachProgress(rounds, 4)).toBe(1); // wb2: last of 3
+    expect(doubleEliminationApproachProgress(rounds, 1)).toBe(0); // lb0: first of 2 losers rounds
+    expect(doubleEliminationApproachProgress(rounds, 3)).toBe(1); // lb1: last of 2
+  });
+
+  it('is always 1 for the terminal round, whether tagged grand-final or untagged (shared-final variant)', () => {
+    expect(doubleEliminationApproachProgress(rounds, 5)).toBe(1);
+    const sharedFinalRounds = [
+      buildRound({ roundNum: 1, bracket: 'winners', rooms: [2, 2], players: 4 }),
+      buildRound({ roundNum: 2, isFinal: true, rooms: [4], players: 4 }), // no .bracket tag at all
+    ];
+    expect(doubleEliminationApproachProgress(sharedFinalRounds, 1)).toBe(1);
+  });
+
+  it('is 1 for a single-round bracket side (no gradient possible)', () => {
+    const single = [
+      buildRound({ roundNum: 1, bracket: 'winners', rooms: [2], players: 2 }),
+      buildRound({ roundNum: 2, bracket: 'grand-final', isFinal: true, rooms: [2], players: 2 }),
+    ];
+    expect(doubleEliminationApproachProgress(single, 0)).toBe(1);
+  });
+});
+
+describe('tieredBracketSeed', () => {
+  it('sorts the already-tagged pool by (tierRank asc, pct desc, name asc) and respects uneven declared room sizes exactly', () => {
+    const pool = [
+      { name: 'E', tierRank: 1, pct: 0.5, isLucky: false },
+      { name: 'A', tierRank: 0, pct: 0.9, isLucky: false },
+      { name: 'D', tierRank: 1, pct: 0.7, isLucky: false },
+      { name: 'B', tierRank: 0, pct: 0.6, isLucky: false },
+      { name: 'C', tierRank: 1, pct: 0.8, isLucky: false },
+    ];
+    const rounds = [buildRound({ roundNum: 1, bracket: 'winners', rooms: [3, 2], players: 5 })];
+    const { seeded } = tieredBracketSeed({
+      pool,
+      roomSizes: [3, 2],
+      roomHistory: {},
+      rounds,
+      targetRoundIndex: 0,
+    });
+    expect(seeded).toHaveLength(5);
+    const sizeByRoom = new Map<number, number>();
+    for (const entry of seeded) {
+      if (entry.room === null) continue;
+      sizeByRoom.set(entry.room, (sizeByRoom.get(entry.room) ?? 0) + 1);
+    }
+    expect([...sizeByRoom.entries()].sort()).toEqual([
+      [1, 3],
+      [2, 2],
+    ]);
+  });
+
+  it('avoids a repeat pairing that a plain snakeSeed bounce over the same pool would have reproduced', () => {
+    // Two tierRank-0 entries (A, B, from one source round) and two
+    // tierRank-1 entries (C, D, from a second source round that fed the
+    // same pool -- exactly the multi-source-pool case this function exists
+    // for) -- a plain snakeSeed(4 candidates, 2 rooms) bounce would pair
+    // (A,D) in room 1 and (B,C) in room 2.
+    const pool = [
+      { name: 'A', tierRank: 0, pct: 1, isLucky: false },
+      { name: 'B', tierRank: 0, pct: 0.5, isLucky: false },
+      { name: 'C', tierRank: 1, pct: 1, isLucky: false },
+      { name: 'D', tierRank: 1, pct: 0.5, isLucky: false },
+    ];
+    const baseline = snakeSeed(
+      pool.map((entry) => entry.name),
+      2,
+    );
+    const baselineRoomOf = Object.fromEntries(baseline.map((entry) => [entry.name, entry.room]));
+    expect(baselineRoomOf.A).toBe(baselineRoomOf.D); // confirm the baseline really would pair A with D
+
+    // A two-round losers-bracket sequence; targetRoundIndex=1 is the second
+    // (last) LB round, so doubleEliminationApproachProgress gives it
+    // progress=1 (balance-dominant weights) -- the repeat-avoidance still
+    // wins decisively even under those weights, see the cost trace below.
+    const rounds = [
+      buildRound({ roundNum: 1, bracket: 'losers', rooms: [2, 2], players: 4 }),
+      buildRound({ roundNum: 2, bracket: 'losers', rooms: [2, 2], players: 4 }),
+    ];
+    const { seeded } = tieredBracketSeed({
+      pool,
+      roomSizes: [2, 2],
+      roomHistory: { [roomPairKey('A', 'D')]: 0 }, // A and D shared a room 1 round ago (roundsAgo = 1 - 0)
+      rounds,
+      targetRoundIndex: 1,
+    });
+    const roomOf = Object.fromEntries(seeded.map((entry) => [entry.name, entry.room]));
+    expect(roomOf.A).not.toBe(roomOf.D);
+    expect(seeded).toHaveLength(4);
+  });
+
+  it('returns an empty seed list when roomSizes is empty', () => {
+    const { seeded } = tieredBracketSeed({
+      pool: [{ name: 'A', tierRank: 0, pct: 1, isLucky: false }],
+      roomSizes: [],
+      roomHistory: {},
+      rounds: [],
+      targetRoundIndex: 0,
+    });
+    expect(seeded).toEqual([]);
   });
 });

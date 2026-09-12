@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { advanceTournamentRound } from '../transitions';
-import { raceDoubleEliminationBracketPhase } from '../double-elimination';
-import { snakeSeed } from '../seeding';
+import {
+  raceDoubleEliminationBracketPhase,
+  sharedFinalDoubleEliminationBracketPhase,
+} from '../double-elimination';
+import { roomPairKey, snakeSeed } from '../seeding';
 import { createDefaultTournamentState } from '../state-defaults';
 import { buildRound } from './test-fixtures';
 import type { RoundAssignment } from '../types';
@@ -685,4 +688,242 @@ describe('advanceTournamentRound — tieredSeed reduces round-to-round staleness
     for (const pair of roundIndex1Pairs) expect(secondAdvance.state.roomHistory[pair]).toBeDefined();
     for (const pair of roundIndex2Pairs) expect(secondAdvance.state.roomHistory[pair]).toBe(2);
   });
+});
+
+describe('advanceTournamentRound — double-elimination WB/LB routing via tieredBracketSeed', () => {
+  function scoresForAssignments(
+    roundIndex: number,
+    assignments: RoundAssignment[],
+    scoreByName: Record<string, number>,
+  ): Record<string, number> {
+    const scores: Record<string, number> = {};
+    const positionByRoom = new Map<number, number>();
+    for (const entry of assignments) {
+      if (entry.room === null) continue;
+      const position = positionByRoom.get(entry.room) ?? 0;
+      scores[`r${roundIndex}-rm${entry.room}-p${position}`] = scoreByName[entry.name];
+      positionByRoom.set(entry.room, position + 1);
+    }
+    return scores;
+  }
+
+  function groupByRoom(assignments: RoundAssignment[]): string[][] {
+    const byRoom = new Map<number, string[]>();
+    for (const entry of assignments) {
+      if (entry.room === null) continue;
+      byRoom.set(entry.room, [...(byRoom.get(entry.room) ?? []), entry.name]);
+    }
+    return [...byRoom.entries()].sort(([a], [b]) => a - b).map(([, names]) => [...names].sort());
+  }
+
+  // Shared WB0 setup for an 8-player race (1v1) double-elimination bracket:
+  // 4 head-to-head rooms; P1/P3/P5/P7 win (rank 0), P2/P4/P6/P8 lose (rank 1,
+  // with pct 0.333/0.375/0.412/0.444 respectively -- distinct on purpose, so
+  // the losers pool has an unambiguous sort order for tiebreaking).
+  function buildRound0Assignments(): RoundAssignment[] {
+    return [
+      { name: 'P1', room: 1, isLucky: false },
+      { name: 'P2', room: 1, isLucky: false },
+      { name: 'P3', room: 2, isLucky: false },
+      { name: 'P4', room: 2, isLucky: false },
+      { name: 'P5', room: 3, isLucky: false },
+      { name: 'P6', room: 3, isLucky: false },
+      { name: 'P7', room: 4, isLucky: false },
+      { name: 'P8', room: 4, isLucky: false },
+    ];
+  }
+  const round0Scores: Record<string, number> = {
+    'r0-rm1-p0': 100,
+    'r0-rm1-p1': 50,
+    'r0-rm2-p0': 100,
+    'r0-rm2-p1': 60,
+    'r0-rm3-p0': 100,
+    'r0-rm3-p1': 70,
+    'r0-rm4-p0': 100,
+    'r0-rm4-p1': 80,
+  };
+
+  it('avoids a repeat pairing (engineered via a pre-existing roomHistory entry) in the very first WB0-to-LB0 reseed', () => {
+    const rounds = raceDoubleEliminationBracketPhase(8, 1, {
+      roomSize: { min: 2, max: 2, ideal: 2 },
+      oddCountStrategy: 'bye',
+    });
+    const state = createDefaultTournamentState({
+      gameFormat: 'individual-1v1',
+      gamemodeConfig: { roomSize: { min: 2, max: 2, ideal: 2 } },
+      rounds,
+      assignments: [buildRound0Assignments()],
+      scores: round0Scores,
+      byes: rounds.map(() => []),
+      luckyLosers: rounds.map(() => []),
+      curRound: 0,
+      // P4 and P8 already shared a room -- without this, the natural tiered
+      // assignment pairs them together in LB0 (hand-verified: the losers
+      // pool sorted by pct desc is P8/P6/P4/P2, and the wave-based search
+      // places the first wave [P8,P6] into rooms 1/2 with no history to
+      // avoid, then places [P4,P2] with P4 defaulting to room 1 alongside
+      // P8 absent any repeat pressure). With this entry present, the search
+      // must place P4 away from P8 instead.
+      roomHistory: { [roomPairKey('P4', 'P8')]: 0 },
+    });
+
+    const result = advanceTournamentRound(state);
+    expect(result.status).toBe('advanced');
+    if (result.status !== 'advanced') return;
+
+    const lb0Index = rounds[0].losersTo as number;
+    expect(result.state.curRound).toBe(lb0Index);
+    const rooms = groupByRoom(result.state.assignments[lb0Index]);
+    expect(rooms).toContainEqual(['P2', 'P8']);
+    expect(rooms).toContainEqual(['P4', 'P6']);
+  });
+
+  it("assembles a multi-source pool (LB0's survivors + WB1's own drops) into one correctly-sized, history-aware reseed", () => {
+    const rounds = raceDoubleEliminationBracketPhase(8, 1, {
+      roomSize: { min: 2, max: 2, ideal: 2 },
+      oddCountStrategy: 'bye',
+    });
+    let state = createDefaultTournamentState({
+      gameFormat: 'individual-1v1',
+      gamemodeConfig: { roomSize: { min: 2, max: 2, ideal: 2 } },
+      rounds,
+      assignments: [buildRound0Assignments()],
+      scores: round0Scores,
+      byes: rounds.map(() => []),
+      luckyLosers: rounds.map(() => []),
+      curRound: 0,
+    });
+
+    const lb0Index = rounds[0].losersTo as number;
+    const wb1Index = rounds[0].winnersTo as number;
+
+    // Advance 1: WB0 -> LB0 finalized (P2/P4/P6/P8); WB1's own pool
+    // (P1/P3/P5/P7) is staged but not yet finalized.
+    const first = advanceTournamentRound(state);
+    expect(first.status).toBe('advanced');
+    if (first.status !== 'advanced') return;
+    state = first.state;
+    expect(state.curRound).toBe(lb0Index);
+
+    // Advance 2: LB0 -> WB1 finalized (from the pool WB0 staged); LB0's own
+    // winners (P8, P6) are staged toward the absorb round.
+    state = {
+      ...state,
+      scores: {
+        ...state.scores,
+        ...scoresForAssignments(lb0Index, state.assignments[lb0Index], { P8: 90, P4: 40, P6: 90, P2: 40 }),
+      },
+    };
+    const second = advanceTournamentRound(state);
+    expect(second.status).toBe('advanced');
+    if (second.status !== 'advanced') return;
+    state = second.state;
+    expect(state.curRound).toBe(wb1Index);
+
+    // Advance 3: WB1 -> the absorb round finalized, pooling BOTH LB0's
+    // already-staged survivors (P8, P6) AND WB1's own just-computed drops
+    // (P5, P7) -- the multi-source pool this whole mechanism exists for.
+    const absorbIndex = rounds[wb1Index].losersTo as number;
+    state = {
+      ...state,
+      scores: {
+        ...state.scores,
+        ...scoresForAssignments(wb1Index, state.assignments[wb1Index], { P1: 100, P5: 30, P3: 100, P7: 45 }),
+      },
+    };
+    const third = advanceTournamentRound(state);
+    expect(third.status).toBe('advanced');
+    if (third.status !== 'advanced') return;
+    state = third.state;
+    expect(state.curRound).toBe(absorbIndex);
+
+    const absorbAssignments = state.assignments[absorbIndex];
+    // The pool is exactly the union of LB0's 2 survivors and WB1's 2
+    // losers -- nobody dropped, nobody duplicated.
+    expect(new Set(absorbAssignments.map((entry) => entry.name))).toEqual(new Set(['P5', 'P6', 'P7', 'P8']));
+    // Room sizes match the round's own declared structure exactly.
+    const roomSizes = groupByRoom(absorbAssignments).map((names) => names.length);
+    expect(roomSizes.slice().sort()).toEqual(rounds[absorbIndex].rooms.slice().sort());
+    // Hand-verified exact assignment: room 1 = {P6, P7}, room 2 = {P8, P5}
+    // (the "wave 0" tier-0 pair P6/P8 has no mutual history and no
+    // engineered collision to avoid, so it lands via the deterministic
+    // first-permutation tiebreak; "wave 1"'s P5/P7 likewise has no repeat
+    // pressure against either of them).
+    expect(groupByRoom(absorbAssignments)).toEqual([
+      ['P6', 'P7'],
+      ['P5', 'P8'],
+    ]);
+
+    // roomHistory now correctly persists across double-elimination rounds
+    // too (previously never recorded at all for this call site) -- every
+    // pair seeded at each of the 3 advances above is present, tagged with
+    // the round it was actually seeded into.
+    expect(state.roomHistory[roomPairKey('P8', 'P4')]).toBe(lb0Index);
+    expect(state.roomHistory[roomPairKey('P6', 'P2')]).toBe(lb0Index);
+    expect(state.roomHistory[roomPairKey('P1', 'P5')]).toBe(wb1Index);
+    expect(state.roomHistory[roomPairKey('P3', 'P7')]).toBe(wb1Index);
+  });
+
+  it('respects declared per-room sizes exactly for the shared-final (multi-unit) double-elimination variant too', () => {
+    const rounds = sharedFinalDoubleEliminationBracketPhase(9, 1, {
+      roomSize: { min: 3, max: 3, ideal: 3 },
+      finalSize: 4,
+      lbQualifiers: 1,
+      finalsGames: 1,
+    });
+    const wb0 = rounds[0];
+    expect(wb0.bracket).toBe('winners');
+
+    let index = 0;
+    const assignments0: RoundAssignment[] = wb0.rooms.flatMap((size, roomZeroBased) =>
+      Array.from({ length: size }, () => {
+        index += 1;
+        return { name: `P${index}`, room: roomZeroBased + 1, isLucky: false };
+      }),
+    );
+    const scores0 = scoresForRoomSizesDescending(0, assignments0);
+
+    const state = createDefaultTournamentState({
+      // Individual format on purpose (not team-3v3v3) -- this test only
+      // needs a room SIZE bigger than head-to-head to exercise multi-unit
+      // tiering; team scoring's own -m{mi} member-key wrapping is an
+      // unrelated concern this test doesn't need to engage with.
+      gameFormat: 'ffa-individual',
+      gamemodeConfig: { roomSize: { min: 3, max: 3, ideal: 3 } },
+      rounds,
+      assignments: [assignments0],
+      scores: scores0,
+      byes: rounds.map(() => []),
+      luckyLosers: rounds.map(() => []),
+      curRound: 0,
+    });
+
+    const result = advanceTournamentRound(state);
+    expect(result.status).toBe('advanced');
+    if (result.status !== 'advanced') return;
+
+    const nextIndex = result.state.curRound;
+    const nextRound = rounds[nextIndex];
+    const actualSizes = groupByRoom(result.state.assignments[nextIndex]).map((names) => names.length);
+    expect(actualSizes.slice().sort()).toEqual(nextRound.rooms.slice().sort());
+    // roomHistory now records this reseed too (previously never written for
+    // double-elimination at all).
+    expect(Object.keys(result.state.roomHistory).length).toBeGreaterThan(0);
+  });
+
+  /** Descending score within each room by array position -- position 0 always ranks highest. */
+  function scoresForRoomSizesDescending(
+    roundIndex: number,
+    assignments: RoundAssignment[],
+  ): Record<string, number> {
+    const scores: Record<string, number> = {};
+    const positionByRoom = new Map<number, number>();
+    for (const entry of assignments) {
+      if (entry.room === null) continue;
+      const position = positionByRoom.get(entry.room) ?? 0;
+      scores[`r${roundIndex}-rm${entry.room}-p${position}`] = 100 - position * 10;
+      positionByRoom.set(entry.room, position + 1);
+    }
+    return scores;
+  }
 });

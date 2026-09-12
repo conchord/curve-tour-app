@@ -1,4 +1,5 @@
 import {
+  buildAdvancementTiers,
   doubleEliminationComputeAdvancement,
   hasPendingTies,
   kingsValleyComputeAdvancement,
@@ -12,8 +13,8 @@ import {
   recordRoomHistory,
   selectPoolingBye,
   sequentialSeed,
-  snakeSeed,
   swissFoldPair,
+  tieredBracketSeed,
   tieredSeed,
   type SeedCandidate,
 } from './seeding';
@@ -115,12 +116,19 @@ function finalizeDoubleEliminationRound(
     const byeSet = new Set(byeNames);
     pool = pool.filter((candidate) => !byeSet.has(candidate.name));
   }
-  const assignments = snakeSeed(pool, targetRound.rooms.length);
+  const assignments = tieredBracketSeed({
+    pool,
+    roomSizes: targetRound.rooms,
+    roomHistory: state.roomHistory,
+    rounds: state.rounds,
+    targetRoundIndex: roundIndex,
+  }).seeded;
   state.byes[roundIndex] = byeNames;
   for (const name of byeNames) {
     assignments.push({ name, room: null, isLucky: false });
   }
   state.assignments[roundIndex] = assignments;
+  state.roomHistory = recordRoomHistory(state.roomHistory, assignments, roundIndex);
 
   if (targetRound.bracket === 'grand-final') {
     const sourceIndex = state.rounds.findIndex(
@@ -167,6 +175,24 @@ function advanceDoubleElimination(
     result.winners = [...state.byes[roundIndex].map((name) => ({ name })), ...result.winners];
   }
 
+  // Tag every contribution with its room-rank tier + in-tier pct at the
+  // moment it's pushed -- buildAdvancementTiers already ranks EVERY occupant
+  // of a room (not just advancers), so a "loser" lands at their own actual
+  // room-rank position and a carried-over bye folds to rank 0/pct 1, exactly
+  // like the generic reseeding path. Captured here, not at finalize time,
+  // because a target round's pool can accumulate from more than one source
+  // round (see transitions.ts's own pendingBracketSeeds accumulation below) --
+  // by finalize time there is no single round left to re-derive this from.
+  const tierByName = new Map(
+    buildAdvancementTiers(state, roundIndex, [
+      ...result.winners.map(({ name }) => name),
+      ...result.losers.map(({ name }) => name),
+    ]).flatMap((tier) =>
+      tier.members.map((member) => [member.name, { tierRank: tier.rank, pct: member.pct }] as const),
+    ),
+  );
+  const tagFor = (name: string) => tierByName.get(name) ?? { tierRank: 0, pct: 1 };
+
   const nextIndex = roundIndex + 1;
   const winnersTarget = round.winnersTo;
   const losersTarget = round.losersTo;
@@ -177,6 +203,7 @@ function advanceDoubleElimination(
           ...result.winners.map(({ name }) => ({
             name,
             isLucky: false,
+            ...tagFor(name),
           })),
         ]
       : null;
@@ -187,6 +214,7 @@ function advanceDoubleElimination(
           ...result.losers.map(({ name }) => ({
             name,
             isLucky: false,
+            ...tagFor(name),
           })),
         ]
       : null;

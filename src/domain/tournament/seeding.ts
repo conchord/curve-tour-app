@@ -1,6 +1,13 @@
 import { buildAdvancementTiers, computeQualificationStandings } from './advancement';
 import type { RandomSource } from './runtime';
-import type { RoomSize, RoundAssignment, TournamentGroup, TournamentRound, TournamentState } from './types';
+import type {
+  PendingBracketSeed,
+  RoomSize,
+  RoundAssignment,
+  TournamentGroup,
+  TournamentRound,
+  TournamentState,
+} from './types';
 
 export interface SeedCandidate {
   name: string;
@@ -482,6 +489,115 @@ export function tieredSeed(options: {
     }
   }
 
+  const seeded: RoundAssignment[] = result.map(({ name, room }) => ({
+    name,
+    room,
+    isLucky: isLuckyByName.get(name) ?? false,
+  }));
+  return { seeded };
+}
+
+/**
+ * Progress toward the terminal round (Grand Final, or the shared-final
+ * variant's untagged terminal Final round) for a double-elimination target
+ * round, computed PER BRACKET SIDE -- winners and losers are two parallel
+ * tracks each independently approaching one shared terminal round, unlike
+ * the generic path's single linear ladder (see semisApproachProgress), so
+ * "how close is THIS side to running out of its own rounds" is the right
+ * question, not "how close is the whole tournament to Semis." A
+ * 'grand-final'-tagged round, or a Final round with no .bracket tag at all
+ * (the shared-final variant's terminal round), always gets progress 1 --
+ * reaching the actual Final is the single highest-stakes reseed, same
+ * reasoning semisApproachProgress uses for the round feeding Semis. New,
+ * not organiser-validated the way semisApproachProgress was -- see the
+ * "Open judgment calls" note in the plan this was built from.
+ */
+export function doubleEliminationApproachProgress(
+  rounds: TournamentRound[],
+  targetRoundIndex: number,
+): number {
+  const targetRound = rounds[targetRoundIndex];
+  const side = targetRound?.bracket;
+  if (side !== 'winners' && side !== 'losers') return 1;
+  const sameSideIndices = rounds
+    .map((round, index) => ({ round, index }))
+    .filter(({ round }) => round.bracket === side)
+    .map(({ index }) => index);
+  if (sameSideIndices.length <= 1) return 1;
+  const position = sameSideIndices.indexOf(targetRoundIndex);
+  return position / (sameSideIndices.length - 1);
+}
+
+/**
+ * Replaces snakeSeed for double-elimination's WB/LB routing
+ * (finalizeDoubleEliminationRound, transitions.ts) -- structurally a thin
+ * sibling of tieredSeed, not a variant that re-derives tiers: `pool` already
+ * carries each entry's tierRank/pct, tagged at push time by
+ * advanceDoubleElimination (see the tagging note there and on
+ * PendingBracketSeed), since a double-elimination target round's pool can
+ * accumulate from more than one source round by the time it's finalized.
+ * Sorts once by (tierRank asc, pct desc, name asc) -- the same deterministic
+ * order buildAdvancementTiers itself produces -- then walks the same
+ * capacity-derived wave logic tieredSeed uses, so uneven room sizes (e.g.
+ * `[8,8,7,7,7]`) are still respected exactly rather than approximated by a
+ * plain room-count bounce.
+ */
+export function tieredBracketSeed(options: {
+  pool: PendingBracketSeed[];
+  roomSizes: number[];
+  roomHistory: Record<string, number>;
+  rounds: TournamentRound[];
+  targetRoundIndex: number;
+}): { seeded: RoundAssignment[] } {
+  const { pool, roomSizes, roomHistory, rounds, targetRoundIndex } = options;
+  if (roomSizes.length === 0) return { seeded: [] };
+
+  const progress = doubleEliminationApproachProgress(rounds, targetRoundIndex);
+  const diversityWeight = lerp(
+    DIVERSITY_PRIORITY_WEIGHT_AT_WARMUP,
+    DIVERSITY_PRIORITY_WEIGHT_AT_SEMIS,
+    progress,
+  );
+  const balanceWeight = lerp(BALANCE_PRIORITY_WEIGHT_AT_WARMUP, BALANCE_PRIORITY_WEIGHT_AT_SEMIS, progress);
+
+  const sorted = [...pool].sort(
+    (first, second) =>
+      first.tierRank - second.tierRank || second.pct - first.pct || first.name.localeCompare(second.name),
+  );
+
+  const allRoomNumbers = roomSizes.map((_, index) => index + 1);
+  const maxWave = Math.max(0, ...roomSizes);
+  const roomMembersSoFar = new Map<number, string[]>(allRoomNumbers.map((room) => [room, []]));
+  const roomBalanceSoFar = new Map<number, number>(allRoomNumbers.map((room) => [room, 0]));
+  const result: Array<{ name: string; room: number }> = [];
+  let cursor = 0;
+  for (let wave = 0; wave < maxWave; wave += 1) {
+    const waveRooms = roomSizes
+      .map((size, index) => ({ size, room: index + 1 }))
+      .filter(({ size }) => size > wave)
+      .map(({ room }) => room);
+    const members = sorted.slice(cursor, cursor + waveRooms.length).map((entry) => ({
+      name: entry.name,
+      tierRank: entry.tierRank,
+    }));
+    cursor += waveRooms.length;
+    if (members.length === 0) continue;
+    const assigned = assignWaveToRooms(members, waveRooms, roomMembersSoFar, roomBalanceSoFar, {
+      roomHistory,
+      targetRoundIndex,
+      allRoomNumbers,
+      diversityWeight,
+      balanceWeight,
+    });
+    for (const { name, room } of assigned) {
+      roomMembersSoFar.set(room, [...(roomMembersSoFar.get(room) ?? []), name]);
+      const tierRank = members.find((member) => member.name === name)?.tierRank ?? 0;
+      roomBalanceSoFar.set(room, (roomBalanceSoFar.get(room) ?? 0) + tierRank);
+      result.push({ name, room });
+    }
+  }
+
+  const isLuckyByName = new Map(pool.map((entry) => [entry.name, Boolean(entry.isLucky)]));
   const seeded: RoundAssignment[] = result.map(({ name, room }) => ({
     name,
     room,

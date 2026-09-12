@@ -87,10 +87,20 @@ export interface RoundAssignment {
   isLucky?: boolean;
 }
 
-/** A double-elimination route before it is assigned to a physical room. */
+/**
+ * A double-elimination route before it is assigned to a physical room.
+ * `tierRank`/`pct` are tagged once, at the moment this entry is pushed onto
+ * `pendingBracketSeeds` (see `advanceDoubleElimination` in transitions.ts) --
+ * the same room-rank-position signal `buildAdvancementTiers` derives for the
+ * generic reseeding path, captured here because a target round's pool can
+ * accumulate from more than one source round, by which point there is no
+ * single round left to re-derive it from.
+ */
 export interface PendingBracketSeed {
   name: string;
   isLucky?: boolean;
+  tierRank: number;
+  pct: number;
 }
 
 export interface TournamentStanding {

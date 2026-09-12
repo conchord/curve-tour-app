@@ -9,10 +9,12 @@ import { nextPowerOf2AndRounds } from './double-elimination';
 import { seedFromGroupStageRound } from './pooling';
 import {
   avoidSameGroupInFirstBracketRound,
+  recordRoomHistory,
   selectPoolingBye,
   sequentialSeed,
   snakeSeed,
   swissFoldPair,
+  tieredSeed,
   type SeedCandidate,
 } from './seeding';
 import type { RoundAssignment, TournamentRound, TournamentState } from './types';
@@ -54,6 +56,7 @@ function cloneForTransition(state: TournamentState): TournamentState {
     luckyLosers: state.luckyLosers.map((round) => [...round]),
     byes: state.byes.map((round) => [...round]),
     poolingByeCounts: { ...state.poolingByeCounts },
+    roomHistory: { ...state.roomHistory },
     pendingBracketSeeds: Object.fromEntries(
       Object.entries(state.pendingBracketSeeds).map(([key, assignments]) => [
         key,
@@ -331,6 +334,24 @@ export function advanceTournamentRound(input: TournamentState): RoundAdvanceResu
     seeded = paired.seeded;
     state.poolingByeCounts = paired.poolingByeCounts;
     state.byes[roundIndex + 1] = paired.byeName ? [paired.byeName] : [];
+  } else if (nextRound.isKingsValley) {
+    // Kings Valley's own room sizes are already fixed exactly at generation
+    // time (distributeRooms() over the shrinking survivor count -- no bye
+    // concept at all) -- seed into them precisely rather than via
+    // snakeSeed's count-only boustrophedon walk, which can leave a room's
+    // actual occupancy off by one from the structural size its own
+    // promote/demote/eliminate band counts were computed against. (Every
+    // later Kings-Valley-to-Kings-Valley transition already goes through
+    // advanceKingsValley()'s sequentialSeed() call above and doesn't have
+    // this gap -- this is only reached for the one hop into the very first
+    // Kings Valley round, from whatever pooling/no-elim round precedes it.)
+    seeded = sequentialSeed(
+      advancing.map((entry) => entry.name),
+      nextRound.rooms,
+    );
+    if (round.isGroupStage) {
+      seeded = avoidSameGroupInFirstBracketRound(seeded, state.groups);
+    }
   } else {
     const roomSize = state.gamemodeConfig.roomSize;
     if (!roomSize) {
@@ -371,10 +392,11 @@ export function advanceTournamentRound(input: TournamentState): RoundAdvanceResu
         }
       }
     }
-    seeded = snakeSeed(advancing, nextRound.rooms.length);
+    seeded = tieredSeed({ state, roundIndex, advancing }).seeded;
     if (round.isGroupStage) {
       seeded = avoidSameGroupInFirstBracketRound(seeded, state.groups);
     }
+    state.roomHistory = recordRoomHistory(state.roomHistory, seeded, roundIndex + 1);
     if (newByes.length) {
       state.byes[roundIndex + 1] = newByes.map((entry) => entry.name);
       seeded.push(

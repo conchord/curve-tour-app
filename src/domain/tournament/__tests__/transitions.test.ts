@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { advanceTournamentRound } from '../transitions';
 import { raceDoubleEliminationBracketPhase } from '../double-elimination';
+import { snakeSeed } from '../seeding';
 import { createDefaultTournamentState } from '../state-defaults';
 import { buildRound } from './test-fixtures';
+import type { RoundAssignment } from '../types';
 
 describe('advanceTournamentRound — missing roomSize backstop', () => {
   it('returns blocked/"missing-room-size" (not a throw) for a bracket round with no gamemodeConfig.roomSize', () => {
@@ -342,28 +344,33 @@ describe('advanceTournamentRound — next-round seeding dispatch', () => {
       // holds two players from the same group -- verified directly against
       // real output rather than a hand-derived exact seed, since the
       // interaction between computeGroupStageAdvancement's tier-interleaving
-      // and snakeSeed's own bounce order is exactly what's under test here.
-      expect(byRoom.get(1)?.sort()).toEqual(['P1', 'P4']);
-      expect(byRoom.get(2)?.sort()).toEqual(['P2', 'P3']);
+      // and tieredSeed's own tier-rank/pct ordering is exactly what's under
+      // test here. tieredSeed's raw output already places P4 (room2 winner,
+      // pct .952) and P1 (room1 winner, pct .833) into different rooms (tier
+      // 0 alone, one per room), then P2/P3 (tier 1) likewise -- confirmed
+      // directly by running it, this particular case needs no swap at all:
+      // room1={P4,P2} (one from each group), room2={P1,P3} (ditto).
+      expect(byRoom.get(1)?.sort()).toEqual(['P2', 'P4']);
+      expect(byRoom.get(2)?.sort()).toEqual(['P1', 'P3']);
     }
 
     // Without groupStage on the CURRENT round, avoidSameGroupInFirstBracketRound
-    // must never run, even though `state.groups` still has data. Room-based
-    // direct advancement (isNoElim) here produces raw order [P1,P2,P4,P3]
-    // (score-descending within each room, room 1 fully before room 2),
-    // confirmed directly by running it -- snakeSeed's 2-room bounce then
-    // places rm1=[P1,P3], rm2=[P2,P4]. Redefining the groups (independent of
-    // round-0's real room membership -- irrelevant here, since this branch
-    // never reaches computeGroupStageAdvancement/computeGroupStandings) as
-    // A:{P1,P3}, B:{P2,P4} makes rm1/rm2 each a genuine same-group collision
+    // must never run, even though `state.groups` still has data.
+    // buildAdvancementTiers re-derives tiers from state.assignments/scores
+    // directly, independent of round.isGroupStage, so tieredSeed's raw
+    // output is identical either way: room1={P4,P2}, room2={P1,P3} (same as
+    // above), confirmed directly by running it. Redefining the groups
+    // (independent of round-0's real room membership -- irrelevant here,
+    // since this branch never reaches computeGroupStageAdvancement) as
+    // A:{P2,P4}, B:{P1,P3} makes rm1/rm2 each a genuine same-group collision
     // -- if the isGroupStage guard were missing and avoidance ran anyway, a
-    // valid swap (P3<->P2) exists and would change the output. Asserting the
-    // raw, unswapped result is therefore a real test of the guard, not just
-    // of snakeSeed's own bounce order.
+    // valid swap exists and would change the output. Asserting the raw,
+    // unswapped result is therefore a real test of the guard, not just of
+    // tieredSeed's own tier ordering.
     const plain = buildState(false);
     plain.groups = [
-      { label: 'A', members: ['P1', 'P3'] },
-      { label: 'B', members: ['P2', 'P4'] },
+      { label: 'A', members: ['P2', 'P4'] },
+      { label: 'B', members: ['P1', 'P3'] },
     ];
     const withoutAvoidance = advanceTournamentRound(plain);
     expect(withoutAvoidance.status).toBe('advanced');
@@ -372,8 +379,8 @@ describe('advanceTournamentRound — next-round seeding dispatch', () => {
       for (const a of withoutAvoidance.state.assignments[1]) {
         byRoom.set(a.room as number, [...(byRoom.get(a.room as number) ?? []), a.name]);
       }
-      expect(byRoom.get(1)?.sort()).toEqual(['P1', 'P3']);
-      expect(byRoom.get(2)?.sort()).toEqual(['P2', 'P4']);
+      expect(byRoom.get(1)?.sort()).toEqual(['P2', 'P4']);
+      expect(byRoom.get(2)?.sort()).toEqual(['P1', 'P3']);
     }
   });
 });
@@ -493,5 +500,189 @@ describe('advanceTournamentRound — Kings Valley dispatch', () => {
     if (result.status !== 'advanced') return;
     expect(result.state.assignments[1].map((entry) => entry.name)).toEqual(['A', 'B', 'C', 'E', 'D', 'F']);
     expect(result.state.assignments[1].every((entry) => entry.room === 1)).toBe(true);
+  });
+});
+
+describe('advanceTournamentRound — tieredSeed reduces round-to-round staleness vs. plain snakeSeed', () => {
+  // Note on the metric: "overlap" here means shared ROOMMATE PAIRS across
+  // rounds (did these two specific people share a room again), not "did this
+  // player keep the same room NUMBER" -- room numbers carry no identity
+  // across rounds (confirmed directly: a player keeping the same room
+  // NUMBER while gaining entirely new roommates is a success, not staleness)
+  // -- pair co-occurrence is the metric the whole feature (and roomHistory
+  // itself) is actually built around.
+  const staticScore = (name: string) => 100 - Number(name.slice(1));
+
+  function scoresForRooms(roundIndex: number, rooms: string[][]): Record<string, number> {
+    const scores: Record<string, number> = {};
+    rooms.forEach((names, roomZeroBased) => {
+      names.forEach((name, position) => {
+        scores[`r${roundIndex}-rm${roomZeroBased + 1}-p${position}`] = staticScore(name);
+      });
+    });
+    return scores;
+  }
+
+  function assignmentsFromRooms(rooms: string[][]): RoundAssignment[] {
+    return rooms.flatMap((names, roomZeroBased) =>
+      names.map((name) => ({ name, room: roomZeroBased + 1, isLucky: false })),
+    );
+  }
+
+  function roomsFromAssignments(assignments: RoundAssignment[]): string[][] {
+    const byRoom = new Map<number, string[]>();
+    for (const entry of assignments) {
+      if (entry.room === null) continue;
+      byRoom.set(entry.room, [...(byRoom.get(entry.room) ?? []), entry.name]);
+    }
+    return [...byRoom.entries()].sort(([a], [b]) => a - b).map(([, names]) => names);
+  }
+
+  /** Plain baseline: room-major/rank-minor (each room's members sorted by
+   * static score desc, concatenated room by room) through unmodified
+   * snakeSeed -- exactly what the generic path did before this feature. */
+  function baselineNextRooms(currentRooms: string[][], roomCount: number): string[][] {
+    const advancing = currentRooms.flatMap((names) =>
+      [...names].sort((a, b) => staticScore(b) - staticScore(a)),
+    );
+    return roomsFromAssignments(snakeSeed(advancing, roomCount));
+  }
+
+  function pairsIn(rooms: string[][]): Set<string> {
+    const pairs = new Set<string>();
+    for (const names of rooms) {
+      for (let i = 0; i < names.length; i += 1) {
+        for (let j = i + 1; j < names.length; j += 1) {
+          pairs.add(names[i] < names[j] ? `${names[i]}|${names[j]}` : `${names[j]}|${names[i]}`);
+        }
+      }
+    }
+    return pairs;
+  }
+
+  /** Total repeat pairs across a full trajectory of rounds (each round's
+   * pairs checked against everything accumulated from every earlier round),
+   * mirroring roomHistory's own full-history (not just-last-round) scope. */
+  function cumulativeRepeats(trajectory: string[][][]): number {
+    const seen = new Set<string>();
+    let repeats = 0;
+    for (const rooms of trajectory) {
+      for (const pair of pairsIn(rooms)) {
+        if (seen.has(pair)) repeats += 1;
+        seen.add(pair);
+      }
+    }
+    return repeats;
+  }
+
+  // Three distinct starting layouts for 16 players / 4 rooms of 4 -- "several
+  // initial random seedings", hand-constructed (not sorted, not
+  // deliberately balanced) so the comparison isn't tuned to one lucky case.
+  const seedLayouts: string[][][] = [
+    [
+      ['P1', 'P6', 'P11', 'P16'],
+      ['P2', 'P5', 'P12', 'P15'],
+      ['P3', 'P8', 'P9', 'P14'],
+      ['P4', 'P7', 'P10', 'P13'],
+    ],
+    [
+      ['P16', 'P2', 'P9', 'P7'],
+      ['P1', 'P13', 'P4', 'P10'],
+      ['P15', 'P6', 'P3', 'P12'],
+      ['P8', 'P14', 'P5', 'P11'],
+    ],
+    [
+      ['P5', 'P12', 'P1', 'P8'],
+      ['P16', 'P4', 'P9', 'P13'],
+      ['P2', 'P11', 'P6', 'P15'],
+      ['P14', 'P3', 'P10', 'P7'],
+    ],
+  ];
+
+  it('across several distinct starting layouts, chaining real advances accumulates strictly fewer total repeat-pairs than a plain-snakeSeed baseline chained the same way', () => {
+    const roundCount = 5; // 5 isNoElim rounds -> 4 real reseed transitions each
+    let totalReal = 0;
+    let totalBaseline = 0;
+
+    for (const layout of seedLayouts) {
+      // --- Real trajectory: driven entirely through advanceTournamentRound. ---
+      let state = createDefaultTournamentState({
+        gameFormat: 'ffa-individual',
+        gamemodeConfig: { roomSize: { min: 4, max: 4, ideal: 4 } },
+        players: layout.flat(),
+        rounds: Array.from({ length: roundCount }, (_, index) =>
+          buildRound({ roundNum: index + 1, isNoElim: true, rooms: [4, 4, 4, 4], players: 16 }),
+        ),
+        assignments: [assignmentsFromRooms(layout)],
+        scores: scoresForRooms(0, layout),
+        curRound: 0,
+      });
+      const realTrajectory: string[][][] = [layout];
+      for (let roundIndex = 0; roundIndex < roundCount - 1; roundIndex += 1) {
+        const advance = advanceTournamentRound(state);
+        expect(advance.status).toBe('advanced');
+        if (advance.status !== 'advanced') break;
+        state = advance.state;
+        const rooms = roomsFromAssignments(state.assignments[roundIndex + 1]);
+        realTrajectory.push(rooms);
+        state = { ...state, scores: { ...state.scores, ...scoresForRooms(roundIndex + 1, rooms) } };
+      }
+
+      // --- Baseline trajectory: plain snakeSeed, chained independently. ---
+      const baselineTrajectory: string[][][] = [layout];
+      let currentBaselineRooms = layout;
+      for (let roundIndex = 0; roundIndex < roundCount - 1; roundIndex += 1) {
+        currentBaselineRooms = baselineNextRooms(currentBaselineRooms, 4);
+        baselineTrajectory.push(currentBaselineRooms);
+      }
+
+      totalReal += cumulativeRepeats(realTrajectory);
+      totalBaseline += cumulativeRepeats(baselineTrajectory);
+    }
+
+    expect(totalReal).toBeLessThan(totalBaseline);
+  });
+
+  it('persists roomHistory across real advances, recording every pair that has actually shared a room', () => {
+    const layout = seedLayouts[0];
+    let state = createDefaultTournamentState({
+      gameFormat: 'ffa-individual',
+      gamemodeConfig: { roomSize: { min: 4, max: 4, ideal: 4 } },
+      players: layout.flat(),
+      rounds: [
+        buildRound({ roundNum: 1, isNoElim: true, rooms: [4, 4, 4, 4], players: 16 }),
+        buildRound({ roundNum: 2, isNoElim: true, rooms: [4, 4, 4, 4], players: 16 }),
+        buildRound({ roundNum: 3, isNoElim: true, rooms: [4, 4, 4, 4], players: 16 }),
+      ],
+      assignments: [assignmentsFromRooms(layout)],
+      scores: scoresForRooms(0, layout),
+      curRound: 0,
+    });
+    expect(state.roomHistory).toEqual({});
+
+    const firstAdvance = advanceTournamentRound(state);
+    expect(firstAdvance.status).toBe('advanced');
+    if (firstAdvance.status !== 'advanced') return;
+    state = firstAdvance.state;
+    // recordRoomHistory tags the round being SEEDED INTO (index 1) -- the
+    // starting layout (index 0) was never itself seeded by any code here,
+    // so it leaves no history of its own.
+    const roundIndex1Rooms = roomsFromAssignments(state.assignments[1]);
+    const roundIndex1Pairs = pairsIn(roundIndex1Rooms);
+    expect(new Set(Object.keys(state.roomHistory))).toEqual(roundIndex1Pairs);
+    expect(Object.values(state.roomHistory).every((recordedRoundIndex) => recordedRoundIndex === 1)).toBe(
+      true,
+    );
+
+    state = { ...state, scores: { ...state.scores, ...scoresForRooms(1, roundIndex1Rooms) } };
+    const secondAdvance = advanceTournamentRound(state);
+    expect(secondAdvance.status).toBe('advanced');
+    if (secondAdvance.status !== 'advanced') return;
+    const roundIndex2Pairs = pairsIn(roomsFromAssignments(secondAdvance.state.assignments[2]));
+    // Every pair recorded after the first advance is still present (history
+    // is cumulative, not just-last-round), plus the second advance's own
+    // newly-seeded pairs are now recorded too, tagged with round index 2.
+    for (const pair of roundIndex1Pairs) expect(secondAdvance.state.roomHistory[pair]).toBeDefined();
+    for (const pair of roundIndex2Pairs) expect(secondAdvance.state.roomHistory[pair]).toBe(2);
   });
 });

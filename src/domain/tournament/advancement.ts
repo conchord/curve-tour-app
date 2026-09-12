@@ -397,6 +397,79 @@ export function roomBasedComputeAdvancement(state: TournamentState, roundIndex: 
   };
 }
 
+export interface AdvancementTierMember {
+  name: string;
+  /** score / own-room total in the round just completed -- an in-tier tiebreak only, never meaningfully comparable across tiers (a room-winner's dominance margin only says something about their own specific opponents). */
+  pct: number;
+  sourceRoom: number;
+}
+
+export interface AdvancementTier {
+  /** 0 = room winners (or a carried-over bye), 1 = runners-up, etc. */
+  rank: number;
+  members: AdvancementTierMember[];
+}
+
+/**
+ * Groups `names` (an advancing/survivor list, however it was selected -- room
+ * cutoffs, lucky losers, or even a global cumulative-standings cutoff like
+ * Qualification Table's last round) by each unit's RANK POSITION within
+ * whichever room they were actually in during `roundIndex`, using that
+ * round's own scores -- independent of how `names` was chosen. This is the
+ * diversity/rematch-avoidance signal for reseeding: rank position within
+ * your own room is directly trustworthy, `pct` only breaks ties within a
+ * rank (see the field comment above).
+ */
+export function buildAdvancementTiers(
+  state: TournamentState,
+  roundIndex: number,
+  names: string[],
+): AdvancementTier[] {
+  const round = state.rounds[roundIndex];
+  const remaining = new Set(names);
+  const byRank = new Map<number, AdvancementTierMember[]>();
+
+  if (round) {
+    for (let room = 1; room <= round.rooms.length; room += 1) {
+      const scored = orderRoomByScore(scoreRoom(state, roundIndex, room, 0), roundIndex, room, state);
+      const roomTotal = scored.reduce((total, entry) => total + entry.score, 0);
+      for (const [rank, entry] of scored.entries()) {
+        if (!remaining.has(entry.name)) continue;
+        remaining.delete(entry.name);
+        const member: AdvancementTierMember = {
+          name: entry.name,
+          pct: roomTotal > 0 ? entry.score / roomTotal : 0,
+          sourceRoom: room,
+        };
+        byRank.set(rank, [...(byRank.get(rank) ?? []), member]);
+      }
+    }
+  }
+
+  if (remaining.size > 0) {
+    const byeMembers: AdvancementTierMember[] = [...remaining].map((name) => ({
+      name,
+      pct: 1,
+      sourceRoom: 0,
+    }));
+    byRank.set(0, [...(byRank.get(0) ?? []), ...byeMembers]);
+  }
+
+  return [...byRank.entries()]
+    .sort(([first], [second]) => first - second)
+    .map(([rank, members]) => ({
+      rank,
+      members: members
+        .slice()
+        .sort(
+          (first, second) =>
+            second.pct - first.pct ||
+            first.sourceRoom - second.sourceRoom ||
+            first.name.localeCompare(second.name),
+        ),
+    }));
+}
+
 interface DoubleEliminationAdvancementResult {
   winners: Array<{ name: string }>;
   losers: Array<{ name: string }>;

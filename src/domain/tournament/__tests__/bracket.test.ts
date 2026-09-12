@@ -8,7 +8,7 @@ function project(rounds: TournamentRound[], curRound: number) {
 }
 
 describe('projectFutureRoundSlots', () => {
-  it('projects a plain single-elimination hop as "Winner of Room N", room-major, seeded via snakeSeed', () => {
+  it('projects a plain single-elimination hop as "Winner of Room N", room-major, chunked sequentially into the target room', () => {
     const rounds = [
       buildRound({ roundNum: 1, rooms: [3, 3], players: 6, advPerRoom: 1, luckyCount: 0 }),
       buildRound({ roundNum: 2, rooms: [2], players: 2, advPerRoom: 1, luckyCount: 0 }),
@@ -123,13 +123,46 @@ describe('projectFutureRoundSlots', () => {
     expect(project(groupRounds, 0)[1]).toBeNull();
   });
 
-  it('returns null for a mid-pooling-phase hop (qual round 1 -> qual round 2, neither is the last)', () => {
+  it("projects a mid-pooling-phase hop (qual round 1 -> qual round 2, neither is the last) via the same per-room-rank shape as any other no-elim round -- everyone advances, ranked within their own room, then chunked sequentially into the target round's own declared room sizes (not snake-seeded -- see bracket.ts's comment on why the projection deliberately diverges from the real transition's snakeSeed here)", () => {
     const rounds = [
       buildRound({ roundNum: 1, rooms: [2, 2], players: 4, isQual: true, isNoElim: true }),
       buildRound({ roundNum: 2, rooms: [2, 2], players: 4, isQual: true, isNoElim: true }),
       buildRound({ roundNum: 3, rooms: [2, 2], players: 4, isQual: true, isNoElim: true }),
     ];
-    expect(project(rounds, 0)[1]).toBeNull();
+    const result = project(rounds, 0);
+    // Pool = [R1r1, R1r2, R2r1, R2r2] (room-major); chunked sequentially into
+    // 2 target rooms of size 2 each: room1 <- [R1r1, R1r2], room2 <- [R2r1, R2r2].
+    expect(result[1]?.[0].map(projectedSlotLabelText)).toEqual(['Room 1, Rank 1', 'Room 1, Rank 2']);
+    expect(result[1]?.[1].map(projectedSlotLabelText)).toEqual(['Room 2, Rank 1', 'Room 2, Rank 2']);
+  });
+
+  it('projects a no-elim (e.g. "None" pooling warmup) round using each room\'s own size -- nobody is cut, but within-room rank still carries forward, and room sizes can differ; every target room\'s slot count always matches its own declared size exactly', () => {
+    const rounds = [
+      buildRound({ roundNum: 1, rooms: [3, 2], players: 5, isNoElim: true }),
+      buildRound({ roundNum: 2, rooms: [3, 2], players: 5, isNoElim: true }),
+    ];
+    const result = project(rounds, 0);
+    // Pool = [R1r1, R1r2, R1r3, R2r1, R2r2]; chunked sequentially into rooms
+    // sized [3, 2]: room1 (size 3) <- [R1r1, R1r2, R1r3], room2 (size 2) <- [R2r1, R2r2].
+    expect(result[1]?.[0].map(projectedSlotLabelText)).toEqual([
+      'Room 1, Rank 1',
+      'Room 1, Rank 2',
+      'Room 1, Rank 3',
+    ]);
+    expect(result[1]?.[1].map(projectedSlotLabelText)).toEqual(['Room 2, Rank 1', 'Room 2, Rank 2']);
+  });
+
+  it('resolves every round in a chain of no-elim rounds feeding a real elimination round -- poisoning no longer cascades past a no-elim predecessor', () => {
+    const rounds = [
+      buildRound({ roundNum: 1, rooms: [4], players: 4, isNoElim: true }),
+      buildRound({ roundNum: 2, rooms: [4], players: 4, isNoElim: true }),
+      buildRound({ roundNum: 3, rooms: [4], players: 4, advPerRoom: 1, luckyCount: 0 }),
+      buildRound({ roundNum: 4, rooms: [1], players: 1, advPerRoom: 1, luckyCount: 0 }),
+    ];
+    const result = project(rounds, 0);
+    expect(result[1]).not.toBeNull();
+    expect(result[2]).not.toBeNull();
+    expect(result[3]?.[0].map(projectedSlotLabelText)).toEqual(['Winner of Room 1']);
   });
 
   it('falls back to null on a structural token-count mismatch (e.g. an unmodeled bye), and poisons downstream rounds', () => {

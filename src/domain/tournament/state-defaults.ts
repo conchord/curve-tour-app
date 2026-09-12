@@ -16,6 +16,7 @@ export function createDefaultTournamentState(overrides: Partial<TournamentState>
     luckyLosers: [],
     byes: [],
     poolingByeCounts: {},
+    roomHistory: {},
     pendingBracketSeeds: {},
     qualTable: [],
     groups: [],

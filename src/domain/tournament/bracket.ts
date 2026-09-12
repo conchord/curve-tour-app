@@ -1,5 +1,5 @@
 import { lastAssignedRound } from './rankings';
-import { snakeSeed } from './seeding';
+import { sequentialSeed } from './seeding';
 import type { TournamentRound, TournamentState } from './types';
 
 interface BracketRoundLabel {
@@ -135,10 +135,14 @@ function predecessorsOf(rounds: TournamentRound[], targetIndex: number): Predece
 
 /**
  * Structural, score-independent projection of where each future round's slots will
- * likely come from. Computed once per render over the whole rounds array. A round
- * index maps to null when its origin can't be resolved ahead of time (group-stage —
- * handled by real names elsewhere; Swiss — handled by the existing pairingTBD note;
- * a no-elim predecessor; a mid-pooling-phase hop; or a structural token-count
+ * likely come from. Computed once per render over the whole rounds array. A no-elim
+ * predecessor (e.g. the "None" pooling phase's warmup rounds) still contributes a
+ * real per-room projection -- nobody is cut, but roomBasedComputeAdvancement ranks
+ * each room's occupants by score before handing the whole room on, so the same
+ * room-rank shape applies, just with every position filled instead of a top-N cut.
+ * A round index maps to null when its origin genuinely can't be resolved ahead of
+ * time (group-stage -- handled by real names elsewhere; Swiss -- handled by the
+ * existing pairingTBD note; a mid-pooling-phase hop; or a structural token-count
  * mismatch, e.g. an unmodeled bye). A null result poisons every downstream round fed
  * (even indirectly) by that round.
  */
@@ -179,12 +183,6 @@ export function projectFutureRoundSlots(
       continue;
     }
 
-    if (predecessors.some(({ sourceIndex }) => rounds[sourceIndex].isNoElim)) {
-      result[targetIndex] = null;
-      unresolved.add(targetIndex);
-      continue;
-    }
-
     const pool: ProjectedSlotLabel[] = [];
     for (const { sourceIndex, edge } of predecessors) {
       const source = rounds[sourceIndex];
@@ -211,6 +209,23 @@ export function projectFutureRoundSlots(
         }
         continue;
       }
+      if (source.isNoElim) {
+        // Nobody is cut, but everyone's rank within their own room still
+        // carries forward (roomBasedComputeAdvancement ranks a no-elim
+        // room's occupants by score before handing the whole room on) --
+        // project every position of every room using that room's own size,
+        // rather than treating a no-elim round as unknowable. Room sizes can
+        // differ (e.g. [8,8,7,7,7]), so this must be computed per room, not
+        // from a single round-wide advPerRoom the way every other room-based
+        // round already is.
+        for (let room = 1; room <= source.rooms.length; room += 1) {
+          const roomSize = source.rooms[room - 1];
+          for (let rank = 1; rank <= roomSize; rank += 1) {
+            pool.push({ kind: 'room-rank', room, rank, advPerRoom: roomSize });
+          }
+        }
+        continue;
+      }
       const advPerRoom = source.advPerRoom ?? 0;
       for (let room = 1; room <= source.rooms.length; room += 1) {
         for (let rank = 1; rank <= advPerRoom; rank += 1)
@@ -226,8 +241,18 @@ export function projectFutureRoundSlots(
       continue;
     }
 
-    const candidates = pool.map((_, index) => ({ name: String(index) }));
-    const seeded = snakeSeed(candidates, round.rooms.length);
+    // Chunk the pool directly into round.rooms' declared sizes rather than
+    // mirroring snakeSeed's count-only boustrophedon bounce -- the real
+    // transition still seeds via snakeSeed (unchanged here), so a projected
+    // room's contents can drift slightly from what actually lands there once
+    // the round is reached. That drift is accepted as the honest tradeoff:
+    // every projected slot always matches its own room's displayed size
+    // exactly (no more blank dashes or invisible overflow into another
+    // room), which is the property this display is for.
+    const seeded = sequentialSeed(
+      pool.map((_, index) => String(index)),
+      round.rooms,
+    );
     const byRoom: ProjectedSlotLabel[][] = round.rooms.map(() => []);
     for (const assignment of seeded) {
       if (assignment.room === null) continue;

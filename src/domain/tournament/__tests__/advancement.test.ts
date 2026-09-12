@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildAdvancementTiers,
   computeGroupStandings,
   computeLuckyLoserStandings,
   computeQualificationStandings,
@@ -697,5 +698,80 @@ describe('kingsValleyComputeAdvancement', () => {
     // feeding room2, then room2's own stay band, with no room-3 inflow.
     expect(nextRoomOrder).toEqual(['A', 'B', 'C', 'E', 'D', 'F']);
     expect(eliminatedNames).toEqual(['G', 'H']);
+  });
+});
+
+describe('buildAdvancementTiers', () => {
+  it('groups by room-rank position, tie-broken by pct within a rank -- never comparing pct across ranks', () => {
+    const state = createDefaultTournamentState({
+      gameFormat: 'ffa-individual',
+      rounds: [buildRound({ roundNum: 1, rooms: [2, 2], players: 4, isNoElim: true })],
+      assignments: [
+        [
+          { name: 'P1', room: 1, isLucky: false },
+          { name: 'P2', room: 1, isLucky: false },
+          { name: 'P3', room: 2, isLucky: false },
+          { name: 'P4', room: 2, isLucky: false },
+        ],
+      ],
+      scores: { 'r0-rm1-p0': 100, 'r0-rm1-p1': 50, 'r0-rm2-p0': 10, 'r0-rm2-p1': 90 },
+    });
+    // Room 1: P1=100 (rank0, pct 100/150=.667), P2=50 (rank1, pct .333).
+    // Room 2: sorted desc -> P4=90 (rank0, pct 90/100=.9), P3=10 (rank1, pct .1).
+    const tiers = buildAdvancementTiers(state, 0, ['P1', 'P2', 'P3', 'P4']);
+    expect(tiers.map((tier) => tier.rank)).toEqual([0, 1]);
+    // Rank 0: P4's pct (.9) beats P1's (.667) -- both are room winners, only
+    // their OWN room's pct decides tiebreak order between them.
+    expect(tiers[0].members.map((member) => member.name)).toEqual(['P4', 'P1']);
+    expect(tiers[0].members[0].pct).toBeCloseTo(0.9);
+    expect(tiers[0].members[1].pct).toBeCloseTo(100 / 150);
+    // Rank 1: P2's pct (.333) beats P3's (.1).
+    expect(tiers[1].members.map((member) => member.name)).toEqual(['P2', 'P3']);
+  });
+
+  it('keeps a lucky loser at their real room-rank position instead of dropping them', () => {
+    const state = createDefaultTournamentState({
+      gameFormat: 'ffa-individual',
+      rounds: [buildRound({ roundNum: 1, rooms: [3], players: 3, advPerRoom: 1, luckyCount: 1 })],
+      assignments: [
+        [
+          { name: 'P1', room: 1, isLucky: false },
+          { name: 'P2', room: 1, isLucky: false },
+          { name: 'P3', room: 1, isLucky: false },
+        ],
+      ],
+      scores: { 'r0-rm1-p0': 100, 'r0-rm1-p1': 50, 'r0-rm1-p2': 10 },
+    });
+    // Only P1 (direct qualifier, rank0) and P3 (a lucky loser who actually
+    // finished 3rd/rank2) are in the advancing list -- P2 (rank1) did not
+    // advance at all, so rank1 has no tier.
+    const tiers = buildAdvancementTiers(state, 0, ['P1', 'P3']);
+    expect(tiers.map((tier) => tier.rank)).toEqual([0, 2]);
+    expect(tiers[0].members.map((member) => member.name)).toEqual(['P1']);
+    expect(tiers[1].members.map((member) => member.name)).toEqual(['P3']);
+  });
+
+  it('folds a carried-over bye (present in `names` but absent from every room) into rank 0 with pct 1', () => {
+    const state = createDefaultTournamentState({
+      gameFormat: 'ffa-individual',
+      rounds: [buildRound({ roundNum: 1, rooms: [2], players: 2, isNoElim: true })],
+      assignments: [
+        [
+          { name: 'P1', room: 1, isLucky: false },
+          { name: 'P2', room: 1, isLucky: false },
+        ],
+      ],
+      scores: { 'r0-rm1-p0': 100, 'r0-rm1-p1': 50 },
+      byes: [['P5']],
+    });
+    const tiers = buildAdvancementTiers(state, 0, ['P1', 'P2', 'P5']);
+    expect(tiers.map((tier) => tier.rank)).toEqual([0, 1]);
+    // P5 (pct 1, a bye "beats" everyone by construction) sorts ahead of P1
+    // (real room winner, pct .667) within rank 0.
+    expect(tiers[0].members.map((member) => member.name)).toEqual(['P5', 'P1']);
+    const bye = tiers[0].members.find((member) => member.name === 'P5');
+    expect(bye?.pct).toBe(1);
+    expect(bye?.sourceRoom).toBe(0);
+    expect(tiers[1].members.map((member) => member.name)).toEqual(['P2']);
   });
 });

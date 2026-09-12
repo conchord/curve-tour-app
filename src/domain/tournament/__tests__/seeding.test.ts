@@ -1,11 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import {
+  assignWaveToRooms,
   avoidSameGroupInFirstBracketRound,
   randomSeed,
+  recencyWeight,
+  RECENCY_REPEAT_WEIGHT_K,
+  roomPairKey,
   selectPoolingBye,
+  semisApproachProgress,
   sequentialSeed,
   snakeSeed,
   swissFoldPair,
+  tieredSeed,
 } from '../seeding';
 import { createDefaultTournamentState } from '../state-defaults';
 import { buildRound, sequenceRandom } from './test-fixtures';
@@ -266,6 +272,204 @@ describe('sequentialSeed', () => {
     expect(sequentialSeed(['A', 'B'], [2, 2])).toEqual([
       { name: 'A', room: 1, isLucky: false },
       { name: 'B', room: 1, isLucky: false },
+    ]);
+  });
+});
+
+describe('recencyWeight', () => {
+  it('is exactly 1 + K at roundsAgo=1 (played together last round) and decays toward 1 for older repeats', () => {
+    expect(recencyWeight(1)).toBeCloseTo(1 + RECENCY_REPEAT_WEIGHT_K);
+    expect(recencyWeight(2)).toBeCloseTo(1 + RECENCY_REPEAT_WEIGHT_K / 2);
+    expect(recencyWeight(10)).toBeGreaterThan(1);
+    expect(recencyWeight(10)).toBeLessThan(recencyWeight(1));
+  });
+});
+
+describe('assignWaveToRooms', () => {
+  it('avoids placing a candidate into a room already holding a player they have real match history with', () => {
+    // Three tierRank-0 candidates (equal tierRank -> balanceCost is
+    // identical for every permutation here, isolating repeat-avoidance).
+    // Room 1 already holds 'X'; A and X shared a room 2 rounds before the
+    // round being seeded into (targetRoundIndex=5 -> roundsAgo=5-3=2).
+    const members = [
+      { name: 'A', tierRank: 0 },
+      { name: 'B', tierRank: 0 },
+      { name: 'C', tierRank: 0 },
+    ];
+    const roomMembersSoFar = new Map([
+      [1, ['X']],
+      [2, []],
+      [3, []],
+    ]);
+    const roomBalanceSoFar = new Map([
+      [1, 0],
+      [2, 0],
+      [3, 0],
+    ]);
+    const result = assignWaveToRooms(members, [1, 2, 3], roomMembersSoFar, roomBalanceSoFar, {
+      roomHistory: { [roomPairKey('A', 'X')]: 3 },
+      targetRoundIndex: 5,
+      allRoomNumbers: [1, 2, 3],
+      diversityWeight: 10,
+      balanceWeight: 1,
+    });
+    expect(result.find((entry) => entry.name === 'A')?.room).not.toBe(1);
+  });
+
+  it('given two equal-repeat-count choices, prefers avoiding the MORE RECENT repeat over the older one', () => {
+    // A has history with both X (room 1, very recent -- roundsAgo=1) and Y
+    // (room 2, very old -- roundsAgo=10). B has no history with either.
+    // Every permutation forces exactly one repeat (A always joins X or Y) --
+    // the search should pick the cheaper, staler one (A+Y), leaving B with X.
+    const members = [
+      { name: 'A', tierRank: 0 },
+      { name: 'B', tierRank: 0 },
+    ];
+    const roomMembersSoFar = new Map([
+      [1, ['X']],
+      [2, ['Y']],
+    ]);
+    const roomBalanceSoFar = new Map([
+      [1, 0],
+      [2, 0],
+    ]);
+    const result = assignWaveToRooms(members, [1, 2], roomMembersSoFar, roomBalanceSoFar, {
+      roomHistory: {
+        [roomPairKey('A', 'X')]: 19, // roundsAgo = 20 - 19 = 1
+        [roomPairKey('A', 'Y')]: 10, // roundsAgo = 20 - 10 = 10
+      },
+      targetRoundIndex: 20,
+      allRoomNumbers: [1, 2],
+      diversityWeight: 10,
+      balanceWeight: 1,
+    });
+    expect(result.find((entry) => entry.name === 'A')?.room).toBe(2);
+    expect(result.find((entry) => entry.name === 'B')?.room).toBe(1);
+  });
+});
+
+describe('semisApproachProgress', () => {
+  const rounds = [
+    buildRound({ roundNum: 1, isNoElim: true, rooms: [4, 4], players: 8 }),
+    buildRound({ roundNum: 2, isNoElim: true, rooms: [4, 4], players: 8 }),
+    buildRound({ roundNum: 3, rooms: [4, 4], players: 8, advPerRoom: 3 }), // first real elim round, index 2
+    buildRound({ roundNum: 4, rooms: [4, 4], players: 6, advPerRoom: 2 }), // index 3
+    buildRound({ roundNum: 5, rooms: [4, 4], players: 4, advPerRoom: 2 }), // index 4 -- transitions INTO Semis
+    buildRound({ roundNum: 6, isSemis: true, rooms: [4], players: 4 }), // index 5
+    buildRound({ roundNum: 7, isFinal: true, rooms: [1], players: 1 }), // index 6
+  ];
+
+  it('is 0 throughout the no-elim/pooling phase', () => {
+    expect(semisApproachProgress(rounds, 0)).toBe(0);
+    expect(semisApproachProgress(rounds, 1)).toBe(0);
+  });
+
+  it('is 0 at the first real elimination round and rises linearly to 1 at the round transitioning into Semis', () => {
+    expect(semisApproachProgress(rounds, 2)).toBe(0);
+    expect(semisApproachProgress(rounds, 3)).toBe(0.5);
+    expect(semisApproachProgress(rounds, 4)).toBe(1);
+  });
+
+  it('falls back to Final when no isSemis round exists, treating the sole elimination round as immediately decisive', () => {
+    const noSemis = [
+      buildRound({ roundNum: 1, rooms: [2, 2], players: 4, advPerRoom: 1 }),
+      buildRound({ roundNum: 2, isFinal: true, rooms: [1], players: 1 }),
+    ];
+    expect(semisApproachProgress(noSemis, 0)).toBe(1);
+  });
+});
+
+describe('tieredSeed', () => {
+  it('builds a pool from per-room rank tiers (not room-major/rank-minor) and avoids a repeat that plain snakeSeed would have reproduced', () => {
+    const state = createDefaultTournamentState({
+      gameFormat: 'ffa-individual',
+      gamemodeConfig: { roomSize: { min: 2, max: 2, ideal: 2 } },
+      rounds: [
+        // isNoElim forces semisApproachProgress's progress=0 here, isolating
+        // the repeat-avoidance mechanism from the Semis taper -- the taper
+        // itself is covered separately above.
+        buildRound({ roundNum: 1, isNoElim: true, rooms: [4, 4], players: 8, advPerRoom: 2 }),
+        buildRound({ roundNum: 2, rooms: [2, 2], players: 4 }),
+      ],
+      assignments: [
+        [
+          { name: 'A', room: 1, isLucky: false },
+          { name: 'B', room: 1, isLucky: false },
+          { name: 'C', room: 1, isLucky: false },
+          { name: 'D', room: 1, isLucky: false },
+          { name: 'E', room: 2, isLucky: false },
+          { name: 'F', room: 2, isLucky: false },
+          { name: 'G', room: 2, isLucky: false },
+          { name: 'H', room: 2, isLucky: false },
+        ],
+      ],
+      scores: {
+        'r0-rm1-p0': 100,
+        'r0-rm1-p1': 90,
+        'r0-rm1-p2': 80,
+        'r0-rm1-p3': 70,
+        'r0-rm2-p0': 60,
+        'r0-rm2-p1': 50,
+        'r0-rm2-p2': 40,
+        'r0-rm2-p3': 30,
+      },
+      // Baseline: what plain room-major/rank-minor concatenation through
+      // snakeSeed would have produced for this exact advancing list --
+      // confirmed directly below, not assumed.
+      roomHistory: {},
+    });
+    const advancing = [{ name: 'A' }, { name: 'B' }, { name: 'E' }, { name: 'F' }];
+    const baseline = snakeSeed(advancing, 2);
+    const baselineRoomOf = Object.fromEntries(baseline.map((entry) => [entry.name, entry.room]));
+    expect(baselineRoomOf.A).toBe(baselineRoomOf.F); // plain snakeSeed pairs A with F
+
+    // Engineer roomHistory so A and F have real, recent match history --
+    // the exact pairing plain snakeSeed would have reproduced above.
+    const stateWithHistory = { ...state, roomHistory: { [roomPairKey('A', 'F')]: 0 } };
+    const { seeded } = tieredSeed({ state: stateWithHistory, roundIndex: 0, advancing });
+    const roomOf = Object.fromEntries(seeded.map((entry) => [entry.name, entry.room]));
+    expect(roomOf.A).not.toBe(roomOf.F);
+    // Every candidate still placed exactly once, into one of the two rooms.
+    expect(seeded).toHaveLength(4);
+    expect(new Set(seeded.map((entry) => entry.room))).toEqual(new Set([1, 2]));
+  });
+
+  it('chunks into capacity-derived waves so a shrinking room-size distribution (e.g. [3,2] from an uneven cut) is handled correctly', () => {
+    const state = createDefaultTournamentState({
+      gameFormat: 'ffa-individual',
+      gamemodeConfig: { roomSize: { min: 2, max: 3, ideal: 3 } },
+      rounds: [
+        buildRound({ roundNum: 1, isNoElim: true, rooms: [3, 2], players: 5 }),
+        buildRound({ roundNum: 2, rooms: [3, 2], players: 5 }),
+      ],
+      assignments: [
+        [
+          { name: 'A', room: 1, isLucky: false },
+          { name: 'B', room: 1, isLucky: false },
+          { name: 'C', room: 1, isLucky: false },
+          { name: 'D', room: 2, isLucky: false },
+          { name: 'E', room: 2, isLucky: false },
+        ],
+      ],
+      scores: {
+        'r0-rm1-p0': 100,
+        'r0-rm1-p1': 90,
+        'r0-rm1-p2': 80,
+        'r0-rm2-p0': 60,
+        'r0-rm2-p1': 50,
+      },
+    });
+    const advancing = [{ name: 'A' }, { name: 'B' }, { name: 'C' }, { name: 'D' }, { name: 'E' }];
+    const { seeded } = tieredSeed({ state, roundIndex: 0, advancing });
+    expect(seeded).toHaveLength(5);
+    const sizeByRoom = new Map<number, number>();
+    for (const entry of seeded) {
+      if (entry.room === null) continue;
+      sizeByRoom.set(entry.room, (sizeByRoom.get(entry.room) ?? 0) + 1);
+    }
+    expect([...sizeByRoom.entries()].sort()).toEqual([
+      [1, 3],
+      [2, 2],
     ]);
   });
 });
